@@ -32,44 +32,6 @@ export class TransactionsController {
     @InjectModel("transaction") private transactionModel: Model<ITransaction>
   ) {}
 
-  @Post("/getCryptoAmountDetails")
-  async getCryptoAmountDetails(
-    @Req() req: any,
-    @Res() response,
-    @Body() body: { usdAmount: any; cryptoSymbol: any }
-  ) {
-    try {
-      if (!req.body.cryptoSymbol) {
-        return response.status(HttpStatus.BAD_REQUEST).json({
-          message: "Please select crypto currency",
-        });
-      } else {
-        let cryptoAmount = null;
-        if (req.body.cryptoSymbol == "USD") {
-          cryptoAmount = body.usdAmount * 0.49;
-        } else {
-          let responseData = await axios.get(
-            `https://api.coingate.com/v2/rates/merchant/${req.body.cryptoSymbol}/USD`
-          );
-          let amountUSD = body.usdAmount * responseData.data;
-          cryptoAmount = amountUSD * 0.49;
-        }
-        if (cryptoAmount) {
-          return response.status(HttpStatus.OK).json({
-            message: `${req.body.cryptoSymbol}: ${req.body.usdAmount} => MID: ${cryptoAmount}`,
-            amount: cryptoAmount,
-          });
-        } else {
-          return response.status(HttpStatus.OK).json({
-            message: "Something went wrong",
-          });
-        }
-      }
-    } catch (err) {
-      return response.status(err.status).json(err.response);
-    }
-  }
-
   @SkipThrottle(false)
   @Post("/createOrder")
   async createOrder(@Req() req: any, @Res() response) {

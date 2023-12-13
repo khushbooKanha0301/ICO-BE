@@ -10,6 +10,6 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe());
   app.use("/uploads", express.static("uploads"));
   app.useGlobalFilters(new CustomThrottlingExceptionFilter());
-  await app.listen(4000);
+  await app.listen(3000);
 }
 bootstrap();
