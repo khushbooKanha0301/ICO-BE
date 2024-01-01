@@ -50,7 +50,7 @@ export class AuthController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
-  
+
   @Get("/getuser/:address")
   async getUserDetailByAddress(
     @Res() response,
@@ -153,19 +153,17 @@ export class AuthController {
   @Post("/callBack")
   async callBack(@Req() req: any, @Res() response) {
     const fields = req.body;
-    if(!fields)
-    {
+    if (!fields) {
       return response.status(HttpStatus.BAD_REQUEST).json({
         message: "failure",
       });
     }
     const trans = await this.transactionService.updateTransactionData(fields);
-    if(trans)
-    {
+    if (trans) {
       return response.status(HttpStatus.OK).json({
         message: "success",
       });
-    }else{
+    } else {
       return response.status(HttpStatus.BAD_REQUEST).json({
         message: "failure",
       });
@@ -224,4 +222,5 @@ export class AuthController {
       return response.status(err.status).json(err.response);
     }
   }
+
 }
