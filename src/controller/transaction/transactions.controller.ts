@@ -22,6 +22,7 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { SkipThrottle } from "@nestjs/throttler";
+
 @SkipThrottle()
 @Controller("transactions")
 export class TransactionsController {
@@ -36,9 +37,9 @@ export class TransactionsController {
   @Post("/createOrder")
   async createOrder(@Req() req: any, @Res() response) {
     if (!req.body?.wallet_address) {
-      return response.status(HttpStatus.OK).json({
-        message: "Wallet address is missing",
-      });
+      return response
+      .status(HttpStatus.BAD_REQUEST)
+      .json({ status: "failure", message: "Wallet address is missing" });
     }
 
     const user = await this.userService.getFindbyAddress(
@@ -46,31 +47,35 @@ export class TransactionsController {
     );
 
     if (!user) {
-      return response.status(HttpStatus.OK).json({
-        message: "Wallet address does not exist",
-      });
+      return response
+      .status(HttpStatus.BAD_REQUEST)
+      .json({ status: "failure", message: "Wallet address does not exist" });
     }
 
     if (user?.status === "Suspend") {
       return response
-        .status(HttpStatus.OK)
-        .json({ message: "Can't Buy Token, You are Suspended by Admin." });
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ status: "failure", message: "Can't Buy Token, You are Suspended by Admin." });
+
     }
 
     if (!req.body?.crypto_currency) {
-      return response.status(HttpStatus.OK).json({
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
         message: "Crypto currency is missing",
       });
     }
 
     if (!req.body?.cryptoAmount) {
-      return response.status(HttpStatus.OK).json({
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
         message: "Crypto amount is missing",
       });
     }
 
     if (!req.body?.amount) {
-      return response.status(HttpStatus.OK).json({
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
         message: "Amount is missing",
       });
     }
@@ -79,13 +84,15 @@ export class TransactionsController {
     const remainingMid = 14000000 - raisedMid;
 
     if (remainingMid <= 0) {
-      return response.status(HttpStatus.OK).json({
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
         message: "Token Balance is empty",
       });
     }
 
     if (remainingMid - req.body?.cryptoAmount < 0) {
-      return response.status(HttpStatus.OK).json({
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
         message: "Token Balance is empty",
       });
     }
@@ -95,6 +102,7 @@ export class TransactionsController {
     );
     let amountUSD = req.body?.amount * responseData.data;
     let apiCryptoAmount = amountUSD * 0.49;
+    
     if(apiCryptoAmount != req.body?.cryptoAmount)
     {
       return response.status(HttpStatus.BAD_REQUEST).json({
@@ -196,7 +204,7 @@ export class TransactionsController {
           tokenData: tokenData,
         });
       } else {
-        return response.status(HttpStatus.OK).json({
+        return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Something went wrong",
         });
       }
@@ -231,7 +239,7 @@ export class TransactionsController {
           totalToken: totalToken,
         });
       } else {
-        return response.status(HttpStatus.OK).json({
+        return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Something went wrong",
         });
       }
@@ -266,7 +274,7 @@ export class TransactionsController {
           totalToken: totalToken,
         });
       } else {
-        return response.status(HttpStatus.OK).json({
+        return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Something went wrong",
         });
       }
@@ -292,7 +300,7 @@ export class TransactionsController {
           transactionData: transactionData,
         });
       } else {
-        return response.status(HttpStatus.OK).json({
+        return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Something went wrong",
         });
       }
