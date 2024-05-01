@@ -33,6 +33,12 @@ export class TransactionsController {
     @InjectModel("transaction") private transactionModel: Model<ITransaction>
   ) {}
 
+  /**
+   * This API endpoint is used to create an order for purchasing tokens.
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Post("/createOrder")
   async createOrder(@Req() req: any, @Res() response) {
@@ -148,6 +154,13 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * This API endpoint retrieves transactions based on specified filters like type and status.
+   * @param req 
+   * @param response 
+   * @param body 
+   * @returns 
+   */
   @Post("/getTransactions")
   async getTransactions(
     @Req() req,
@@ -183,6 +196,12 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * This API endpoint retrieves the total token count for each supported currency (GBP, AUD, EUR) 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Get("/getTokenCount")
   async getTokenCount(@Req() req: any, @Res() response) {
     try {
@@ -215,6 +234,12 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * This API endpoint retrieves the sale graph values and total token count within a specified date range 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Post("/getSaleGrapthValues")
   async getSaleGrapthValues(@Req() req: any, @Res() response) {
     try {
@@ -250,6 +275,12 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * This API endpoint retrieves the line graph values and total token count within a specified date range 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Post("/getLineGrapthValues")
   async getLineGrapthValues(@Req() req: any, @Res() response) {
     try {
@@ -285,6 +316,13 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * This API endpoint retrieves transaction data based on the provided order ID.
+   * @param req 
+   * @param response 
+   * @param param 
+   * @returns 
+   */
   @Get("/getTransactionByOrderId/:orderId")
   async getTransactionByOrderId(
     @Req() req: any,

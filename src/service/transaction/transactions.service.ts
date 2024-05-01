@@ -13,6 +13,7 @@ export class TransactionsService {
     @InjectModel("user") private userModel: Model<IUser>,
     private configService: ConfigService
   ) {}
+
   async createTransaction(data, wallet_address, cryptoAmount, usdAmount): Promise<any> {
     const newTransaction = await new this.transactionModel({
       tran_id: data.id,
@@ -254,6 +255,7 @@ export class TransactionsService {
               $dateToString: {
                 format:
                   filterType === "thisWeekDate" ||
+                  filterType === "thisMonthDate" ||
                   filterType === "lastWeek" ||
                   filterType === "lastMonth"
                     ? "%Y-%m-%d"
@@ -334,6 +336,25 @@ export class TransactionsService {
           .month(i);
         const formattedMonth = previousMonth.format("YYYY-MM");
         mainDates.push(formattedMonth);
+      }
+    } 
+    if (filterType === "thisMonthDate") {
+      // Calculate dates for the current month
+      const thisMonthStart = moment().startOf("month");
+      const thisMonthEnd = moment().endOf("month");
+
+      let currentDatePointer = thisMonthStart.clone();
+      while (currentDatePointer.isSameOrBefore(thisMonthEnd, "day")) {
+        mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
+        currentDatePointer.add(1, "day");
+      }
+    } 
+    if (filterType === "thisYearDate") {
+      const currentYear = moment().year()
+      for (let i = 0; i < 12; i++) {
+        const thisMonth = moment().year(currentYear).month(i)
+        const formattedMonth = thisMonth.format('YYYY-MM')
+        mainDates.push(formattedMonth)
       }
     }
 
@@ -422,6 +443,7 @@ export class TransactionsService {
               $dateToString: {
                 format:
                   filterType === "thisWeekDate" ||
+                  filterType === "thisMonthDate" ||
                   filterType === "lastWeek" ||
                   filterType === "lastMonth"
                     ? "%Y-%m-%d"
@@ -502,6 +524,25 @@ export class TransactionsService {
         mainDates.push(formattedMonth);
       }
     }
+    if (filterType === "thisMonthDate") {
+      // Calculate dates for the current month
+      const thisMonthStart = moment().startOf("month");
+      const thisMonthEnd = moment().endOf("month");
+      let currentDatePointer = thisMonthStart.clone();
+      while (currentDatePointer.isSameOrBefore(thisMonthEnd, "day")) {
+        mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
+        currentDatePointer.add(1, "day");
+      }
+    } 
+    if (filterType === "thisYearDate") {
+      const currentYear = moment().year()
+      for (let i = 0; i < 12; i++) {
+        const thisMonth = moment().year(currentYear).month(i)
+        const formattedMonth = thisMonth.format('YYYY-MM')
+        mainDates.push(formattedMonth)
+      }
+    }
+
     let data = transactions?.map((trans) => {
       let key = trans.label;
       return { [key]: trans.value };
@@ -517,6 +558,7 @@ export class TransactionsService {
     });
     return result;
   }
+  
   async getTransactionByOredrId(orderId): Promise<any> {
     const transaction = this.transactionModel
       .findOne({ tran_id: orderId })

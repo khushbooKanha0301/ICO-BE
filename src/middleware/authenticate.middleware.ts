@@ -11,7 +11,7 @@ import { Model } from "mongoose";
 import { IUser } from "src/interface/users.interface";
 import { TokenService } from "src/service/token/token.service";
 const jwtSecret = "eplba";
-var jwt = require("jsonwebtoken");
+let jwt = require("jsonwebtoken");
 
 @Injectable()
 export class AuthenticateMiddleware implements NestMiddleware {
@@ -22,14 +22,22 @@ export class AuthenticateMiddleware implements NestMiddleware {
 
   async use(req: Request, res: Response, next: NextFunction) {
     try {
+      // Extract the JWT token from the authorization header
       const authHeader = req.headers["authorization"];
       const token = authHeader && authHeader.split(" ")[1];
+
+      // If no token provided, return UNAUTHORIZED status
       if (token == null) {
-        // throw 'NotProvideToken'
-        // throw new HttpException('Authorization Token not found', HttpStatus.UNAUTHORIZED)
+        throw new HttpException(
+          "Authorization Token not found",
+          HttpStatus.UNAUTHORIZED
+        );
       }
 
+      // Check if the token exists in the database
       const isExistingToken = await this.tokenService.getToken(token);
+
+      // If token does not exist and the request is not a login attempt or a POST request, return UNAUTHORIZED status
       if (
         !isExistingToken &&
         req.method !== "POST" &&
@@ -39,49 +47,59 @@ export class AuthenticateMiddleware implements NestMiddleware {
           .status(HttpStatus.UNAUTHORIZED)
           .json({ message: "Authorization Token not valid." });
       }
+
+      // Verify the JWT token
       jwt.verify(token, jwtSecret, async (err, authData) => {
         if (err) {
-          console.log(err);
           return res
             .status(HttpStatus.UNAUTHORIZED)
             .json({ message: "Authorization Token not valid." });
         }
+        
+        // Extract verified user address from authData
         req.headers.address = authData.verifiedAddress;
+
+        // Find user in the database based on wallet address
         const user = await this.userModel
           .findOne({ wallet_address: req.headers.address })
           .exec();
-          if (!user && !req.originalUrl.startsWith("/users/verify")) {
-            let responseData:{message:string,logout?:any} = { message: "Account not found." };
-            if(req.originalUrl == "/users/logout")
-            {
-              responseData = {...responseData,logout:true}
-            }
-            return res
-              .status(HttpStatus.BAD_REQUEST)
-              .json(responseData);
+
+        // Handle cases where user is not found or account is suspended
+        if (!user && !req.originalUrl.startsWith("/users/verify")) {
+          let responseData: { message: string; logout?: any } = {
+            message: "Account not found.",
+          };
+          if (req.originalUrl == "/users/logout") {
+            responseData = { ...responseData, logout: true };
           }
-        if (user?.status === "Suspend") {
-          let responseData:{message:string,logout?:any} = { message: "You are Suspended by Admin." };
-          if(req.originalUrl == "/users/logout")
-          {
-            responseData = {...responseData,logout:true}
-          }
-          return res
-            .status(HttpStatus.BAD_REQUEST)
-            .json(responseData);
+          return res.status(HttpStatus.BAD_REQUEST).json(responseData);
         }
+        if (user?.status === "Suspend") {
+          let responseData: { message: string; logout?: any } = {
+            message: "You are Suspended by Admin.",
+          };
+          if (req.originalUrl == "/users/logout") {
+            responseData = { ...responseData, logout: true };
+          }
+          return res.status(HttpStatus.BAD_REQUEST).json(responseData);
+        }
+        
+        // Attach authData to request headers for use in subsequent middleware or controllers
         req.headers.authData = authData;
         req.body.authData = authData;
+        
+        // Proceed to the next middleware or controller
         if (next) {
           next();
         }
       });
     } catch (error) {
-      let errorMgs = "Internal server error";
-      if (error == "NotProvideToken") {
-        errorMgs = "Authorization Token not found";
+      // Handle errors
+      let errorMessage = "Internal server error";
+      if (error.message === "Authorization Token not found") {
+        errorMessage = error.message;
       }
-      throw new HttpException(errorMgs, error);
+      throw new HttpException(errorMessage, error);
     }
   }
 }

@@ -26,6 +26,7 @@ const getSignMessage = (address, nonce) => {
 const Web3 = require("web3");
 const jwtSecret = "eplba";
 const web3 = new Web3("https://cloudflare-eth.com/");
+
 @SkipThrottle()
 @Controller("auth")
 export class AuthController {
@@ -36,21 +37,40 @@ export class AuthController {
     @InjectModel("transaction") private transactionModel: Model<ITransaction>
   ) {}
 
+  /**
+   * 
+   * @param response 
+   * @param param 
+   * @returns 
+   */
   @Get("/nonce/:addressId")
   async generateToken(@Res() response, @Param() param: { addressId: string }) {
     try {
+      // Generate a nonce (timestamp) for client-side authentication
       const nonce = new Date().getTime();
       const address = param.addressId;
+      
+      // Generate a temporary token (nonce) signed with a JWT secret key
       const tempToken = jwt.sign({ nonce, address }, jwtSecret, {
-        expiresIn: "120s",
+        expiresIn: "120s", // Token expiration time: 120 seconds
       });
+      
+      // Create a message for cryptographic operations using the address ID and nonce
       const message = getSignMessage(address, nonce);
+      
+      // Send the generated token and message as a JSON response
       return response.json({ tempToken, message });
     } catch (err) {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
 
+  /**
+   *  Retrieve user details from the userService based on the provided address
+   * @param response 
+   * @param address 
+   * @returns 
+   */
   @Get("/getuser/:address")
   async getUserDetailByAddress(
     @Res() response,
@@ -78,6 +98,12 @@ export class AuthController {
     }
   }
 
+  /**
+   * Retrieves sale graph values based on the provided options and date range.
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Post("/getSaleGrapthValues")
   async getSaleGrapthValues(@Req() req: any, @Res() response) {
     try {
@@ -114,6 +140,12 @@ export class AuthController {
     }
   }
 
+  /**
+   * Retrieves line graph values based on the provided options and date range.
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Post("/getLineGrapthValues")
   async getLineGrapthValues(@Req() req: any, @Res() response) {
     try {
@@ -150,6 +182,12 @@ export class AuthController {
     }
   }
 
+  /**
+  * Handles callback requests.
+  * @param req 
+  * @param response 
+  * @returns 
+  */
   @Post("/callBack")
   async callBack(@Req() req: any, @Res() response) {
     const fields = req.body;
@@ -170,6 +208,12 @@ export class AuthController {
     }
   }
 
+  /**
+   * Retrieves the total count of MID (Merchant ID) records.
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Get("/getTotalMid")
   async getTotalMid(@Req() req: any, @Res() response) {
     try {
@@ -185,6 +229,13 @@ export class AuthController {
     }
   }
 
+  /**
+   *  Retrieves details of the cryptocurrency amount based on the provided USD amount and cryptocurrency symbol.
+   * @param req 
+   * @param response 
+   * @param body 
+   * @returns 
+   */
   @Post("/getCryptoAmountDetails")
   async getCryptoAmountDetails(
     @Req() req: any,
@@ -222,5 +273,4 @@ export class AuthController {
       return response.status(err.status).json(err.response);
     }
   }
-
 }

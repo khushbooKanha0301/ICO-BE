@@ -47,6 +47,14 @@ export class UsersController {
     private readonly transactionService: TransactionsService
   ) {}
 
+  /**
+   * This API endpoint verifies the authenticity of a user's identity based on the provided signature.
+   * @param req 
+   * @param response 
+   * @param body 
+   * @param query 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Post("/verify")
   async verify(
@@ -147,6 +155,12 @@ export class UsersController {
     }
   }
 
+  /**
+   * This API endpoint creates a new user based on the provided user data.
+   * @param response 
+   * @param createUserDto 
+   * @returns 
+   */
   @Post()
   async createUsers(@Res() response, @Body() createUserDto: CreateUserDto) {
     try {
@@ -164,6 +178,14 @@ export class UsersController {
     }
   }
 
+  /**
+   * This API endpoint updates user profile information including profile picture.
+   * @param req 
+   * @param response 
+   * @param updateUsersDto 
+   * @param file 
+   * @returns 
+   */
   @Put()
   @UseInterceptors(FileInterceptor("profile"))
   async updateUsers(
@@ -249,6 +271,17 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
+
+  /**
+   * This method handles the updating of KYC (Know Your Customer) information for a user.
+  * It receives the updated KYC data, including personal information and document uploads,
+  * validates the data, and updates the user's KYC information in the database.
+   * @param response 
+   * @param updateKycDto 
+   * @param req 
+   * @param files 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Put("/updateKyc")
   @UseInterceptors(AnyFilesInterceptor())
@@ -402,6 +435,15 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
+
+  /**
+   * This method validates the file type and size of an uploaded file.
+ * It checks if the uploaded file has a valid file extension and size,
+ * and returns an appropriate response message accordingly.
+   * @param response 
+   * @param file 
+   * @returns 
+   */
   @Post("/validate-file-type")
   @UseInterceptors(AnyFilesInterceptor())
   async validateFileType(
@@ -437,6 +479,14 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
+
+  /**
+   * * This method updates the account settings of a user.
+   * @param req 
+   * @param response 
+   * @param updateAccountSettingDto 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Put("/updateAccountSettings")
   async updateAccountSettings(
@@ -1066,6 +1116,12 @@ export class UsersController {
     }
   }
 
+  /**
+   *  * This method retrieves user information based on the authenticated user's address.
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Get("/getuser")
   async getUser(@Req() req: any, @Res() response) {
     try {
@@ -1104,6 +1160,7 @@ export class UsersController {
       return response.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
+
   @Get("/secret")
   async secret(@Req() req, @Res() response) {
     try {
@@ -1113,6 +1170,13 @@ export class UsersController {
     }
   }
 
+  /**
+   * This method handles user logout by deleting the authentication token associated with the user.
+   * @param req 
+   * @param response 
+   * @param updateUsersDto 
+   * @returns 
+   */
   @Get("/logout")
   async logout(
     @Req() req: any,
@@ -1136,6 +1200,14 @@ export class UsersController {
       return response.status(err.status).json(err.response);
     }
   }
+
+  /**
+   * This method generates a secret key for enabling two-factor authentication (2FA) for the user.
+   * 
+   * @param req 
+   * @param res 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Get("/generate2FASecret")
   async generate2FASecret(@Req() req: any, @Res() res) {
@@ -1162,6 +1234,12 @@ export class UsersController {
     }
   }
 
+  /**
+   * This method validates a Time-based One-Time Password (TOTP) token for two-factor authentication (2FA).
+   * @param req 
+   * @param res 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Post("validateTOTP")
   async validateTOTP(@Req() req: any, @Res() res) {
@@ -1198,6 +1276,13 @@ export class UsersController {
       return res.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
+  
+  /**
+   * This method disables two-factor authentication (2FA) for a user.
+   * @param req 
+   * @param res 
+   * @returns 
+   */
   @SkipThrottle(false)
   @Get("disable2FA")
   async disable2FA(@Req() req: any, @Res() res) {
