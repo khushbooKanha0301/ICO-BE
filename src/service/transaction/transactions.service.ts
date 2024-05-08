@@ -444,6 +444,7 @@ export class TransactionsService {
                 format:
                   filterType === "thisWeekDate" ||
                   filterType === "thisMonthDate" ||
+                  filterType === "thisMonthDate" ||
                   filterType === "lastWeek" ||
                   filterType === "lastMonth"
                     ? "%Y-%m-%d"
