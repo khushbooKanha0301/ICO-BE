@@ -2,84 +2,57 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose"
 @Schema()
 export class Transaction {
 	@Prop()
-	tran_id: number;
-	
+	transactionHash: string;
+
 	@Prop()
 	status: string;
+
+	@Prop()
+	user_wallet_address: string;
+
+	@Prop()
+	receiver_wallet_address: string;
+
+	@Prop()
+	network: string;
 	
 	@Prop()
-	title: string;
-
-	@Prop()
-	do_not_convert: boolean;
-
-	@Prop()
-	orderable_type: string;
-
-	@Prop()
-	orderable_id: number;
-
-	@Prop()
 	price_currency: string;
+
+	@Prop()
+	is_sale: boolean;
 
 	@Prop()
 	price_amount: string;
 
 	@Prop()
-	lightning_network: boolean;
-
-	@Prop()
-	receive_currency: string;
-
-	@Prop()
-	receive_amount: string;
-	
-	@Prop()
-	created_at: string;
-
-	@Prop()
-	order_id: string;
-
-	@Prop()
-    payment_url: string;
-
-	@Prop()
-    underpaid_amount: number;
-
-	@Prop()
-	overpaid_amount: string;
-
-	@Prop()
-	is_refundable: boolean;
-
-    @Prop()
-	refunds: string[];
-
-    @Prop()
-	voids: string[];
-
-    @Prop()
-	fees: string[];
-
-    @Prop()
-	token: string;
-
-	@Prop({default: 'Pending'})
-	transaction_status: string;
-
-	@Prop()
-	wallet_address: string;
-
-	@Prop()
 	token_cryptoAmount: string;
 
 	@Prop()
-	source: string;
+	gasUsed: string;
 
+	@Prop()
+	effectiveGasPrice: string;
+
+	@Prop()
+	cumulativeGasUsed: string;
+	
+	@Prop()
+	blockNumber: string;
+
+	@Prop()
+	blockHash: string;
+
+	@Prop()
+	created_at: string;
+	
 	@Prop()
 	paid_at: string;
 
 	@Prop()
-	usd_amount: string;
+	source: string;
+
+	// @Prop()
+	// usd_amount: string;
 }	
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

@@ -2,107 +2,73 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { Model } from "mongoose";
-import { ConfigService } from "@nestjs/config";
 import * as moment from "moment";
 import { IUser } from "src/interface/users.interface";
+import { ISales } from "src/interface/sales.interface";
 
 @Injectable()
 export class TransactionsService {
   constructor(
     @InjectModel("transaction") private transactionModel: Model<ITransaction>,
     @InjectModel("user") private userModel: Model<IUser>,
-    private configService: ConfigService
+    @InjectModel("sales") private salesModel: Model<ISales>
   ) {}
 
-  async createTransaction(data, wallet_address, cryptoAmount, usdAmount): Promise<any> {
-    const newTransaction = await new this.transactionModel({
-      tran_id: data.id,
-      status: data.status,
-      title: data.title,
-      do_not_convert: data.do_not_convert,
-      orderable_type: data.orderable_type,
-      orderable_id: data.orderable_id,
-      price_currency: data.price_currency,
-      price_amount: data.price_amount,
-      lightning_network: data.lightning_network,
-      receive_currency: data.receive_currency,
-      receive_amount: data.receive_amount,
-      created_at: data.created_at,
-      order_id: data.order_id,
-      payment_url: data.payment_url,
-      underpaid_amount: data.underpaid_amount,
-      overpaid_amount: data.overpaid_amount,
-      is_refundable: data.is_refundable,
-      refunds: data.refunds,
-      voids: data.voids,
-      fees: data.fees,
-      token: data.token,
-      transaction_status: "Pending",
-      wallet_address: wallet_address,
-      token_cryptoAmount: cryptoAmount,
-      source:"purchase",
-      usd_amount:usdAmount
-    });
+  createTransaction(transactionData): Promise<any> {
+    const newTransaction = new this.transactionModel(transactionData);
     return newTransaction.save();
   }
 
-  async updateTransactionData(fields:any):Promise<any>
-  {
-    const token = { token: fields.token };
-    if(fields.status == "paid")
-    {
-      fields.paid_at = moment.utc().format();
+  async getSales(){
+    const currentDate = moment.utc().format();
+    return  await this.salesModel.findOne({
+      $and: [
+        { start_sale: { $lte: currentDate } }, 
+        { end_sale: { $gte: currentDate } } 
+      ]
+    }).exec();
+  }
+
+  async getAllSales(){
+    return  await this.salesModel.find().exec();
+  }
+
+
+  async getNearestSale() {
+    const currentDate = moment.utc();
+    const allSales = await this.salesModel.find().exec();
+
+    if (allSales.length === 0) {
+        return null; // No sales found
     }
+
+    // Filter out sales that have already ended before the current date
+    const validSales = allSales.filter(sale => moment(sale.end_sale).isAfter(currentDate));
+    if (validSales.length === 0) {
+        return null; // No valid sales found
+    }
+
+    // Calculate the nearest sale date among the valid sales
+    const nearestSale = validSales.reduce((nearest, sale) => {
+        const startDiff = Math.abs(currentDate.diff(moment(sale.start_sale)));
+        const endDiff = Math.abs(currentDate.diff(moment(sale.end_sale)));
+        
+        const nearestDiff = Math.min(startDiff, endDiff);
+        const currentDiff = nearest ? Math.min(Math.abs(currentDate.diff(moment(nearest.start_sale))), Math.abs(currentDate.diff(moment(nearest.end_sale)))) : Infinity;
+        
+        return nearestDiff < currentDiff ? sale : nearest;
+    }, null);
+    return nearestSale;
+  }
+
+  async updateTransactionData(transactionHash : string, fields:any):Promise<any>
+  {
     const updatedvalues = { $set: fields };
-    if (fields.token) {
-      const trans = await this.transactionModel.updateOne(token, updatedvalues);
-      if(fields.status == "paid")
-      {
-        await this.checkForReferralOrder(fields);
-      }
+    if (transactionHash) {
+      const trans = await this.transactionModel.updateOne({transactionHash : transactionHash}, updatedvalues);
       return trans;
     }
     return null;
-  }
-
-  async checkForReferralOrder(fields:any)
-  {
-    const token = { token: fields.token };
-    const userTrans = await this.transactionModel.findOne(token);
-    if(userTrans)
-    {
-      const totalUserTrans = await this.transactionModel.countDocuments({wallet_address:userTrans.wallet_address,status:"paid"});
-      if(userTrans.status == "paid" && totalUserTrans == 1)
-      {
-        let priceAmount:any = parseFloat(userTrans.price_amount);
-        priceAmount = String(priceAmount * (10/100));
-        let cryptoAmount:any = parseFloat(userTrans.token_cryptoAmount);
-        cryptoAmount = String(cryptoAmount * (10/100));
-        let usdAmount:any = parseFloat(userTrans.usd_amount);
-        usdAmount = String(usdAmount * (10/100));
-        const referredUser = await this.userModel.findOne({wallet_address:userTrans.wallet_address});
-        let referredWalletAddress = referredUser.referred_by; 
-        if(referredWalletAddress)
-        {
-          let orderDocument = {
-            status:"paid",
-            do_not_convert:false,
-            price_currency:fields.price_currency,
-            price_amount:priceAmount,
-            receive_currency:fields.receive_currency,
-            created_at:fields.created_at,
-            is_refundable:false,
-            transaction_status: "Pending",
-            wallet_address: referredWalletAddress,
-            token_cryptoAmount: cryptoAmount,
-            source:"referral",
-            usd_amount: usdAmount
-          }
-          const newTransaction = await new this.transactionModel(orderDocument);
-          newTransaction.save();
-        }
-      }
-    }
   }
 
   async getTransaction(
@@ -115,16 +81,17 @@ export class TransactionsService {
     let transactionsQuery = this.transactionModel.find();
     if(address)
     {
-      transactionsQuery = transactionsQuery.where({wallet_address:address});
+      transactionsQuery = transactionsQuery.where({user_wallet_address:address});
     }
+    // source add
     if(typeFilter && typeFilter.length > 0)
     {
       transactionsQuery = transactionsQuery.where({source:{$in: typeFilter}});
     }
     if(statusFilter && statusFilter.length > 0)
-    {
-      transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
-    }
+      {
+        transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
+      }
     if (page && pageSize) {
       // Calculate the number of documents to skip
       const skipCount = (page - 1) * pageSize;
@@ -132,7 +99,6 @@ export class TransactionsService {
     }
     const transactions = await transactionsQuery
       .sort({ created_at: "desc" })
-      .select("-do_not_convert -token -orderable_type -orderable_id -lightning_network -underpaid_amount -overpaid_amount -fees -is_refundable -refunds -voids -__v")
       .exec();
 
     if (!transactions) {
@@ -145,9 +111,7 @@ export class TransactionsService {
     const midCountResult = await this.transactionModel.aggregate([
       {
         $match: {
-          status: {
-            $in: ["new", "paid", "pending", "confirming"]
-          }
+          status: "paid"
         }
       },
       {
@@ -164,24 +128,38 @@ export class TransactionsService {
           totalAmount: { $round: ["$total", 2] },
         },
       },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $first: "$totalAmount" }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalAmount: { $ifNull: ["$totalAmount", 0] }
+        }
+      }
     ]).exec();
-    return (midCountResult && midCountResult[0]?.totalAmount)?midCountResult[0].totalAmount: 0;
+  
+    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
   }
 
   async getTransactionCount(address: string,typeFilter?:any[],statusFilter?:any[]) {
     let transactionsQuery = this.transactionModel.find();
     if(address)
     {
-      transactionsQuery = transactionsQuery.where({wallet_address:address});
+      transactionsQuery = transactionsQuery.where({user_wallet_address:address});
     }
     if(typeFilter && typeFilter.length > 0)
     {
       transactionsQuery = transactionsQuery.where({source:{$in: typeFilter}});
     }
     if(statusFilter && statusFilter.length > 0)
-    {
-      transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
-    }
+      {
+        transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
+      }
+   
     const count = await transactionsQuery.countDocuments();
     return count;
   }
@@ -194,7 +172,7 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
+      user_wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
@@ -202,7 +180,7 @@ export class TransactionsService {
     if (address !== null) {
       woToken = {
         ...woToken,
-        wallet_address: address,
+        user_wallet_address: address,
       };
     }
 
@@ -213,7 +191,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: address ? "$user_wallet_address" : null,
             totalToken: { $sum: 1 },
           },
         },
@@ -233,7 +211,7 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
+      user_wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
@@ -241,7 +219,7 @@ export class TransactionsService {
     if (address !== null) {
       woToken = {
         ...woToken,
-        wallet_address: address,
+        user_wallet_address: address,
       };
     }
     const transactions = await this.transactionModel
@@ -382,7 +360,7 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
+      user_wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
@@ -390,7 +368,7 @@ export class TransactionsService {
     if (address !== null) {
       woToken = {
         ...woToken,
-        wallet_address: address,
+        user_wallet_address: address,
       };
     }
 
@@ -407,8 +385,7 @@ export class TransactionsService {
         },
       ])
       .exec();
-    totalToken =
-      totalToken.length && totalToken[0] ? totalToken[0].totalToken : 0;
+    totalToken = totalToken.length && totalToken[0] ? totalToken[0].totalToken : 0;
     return totalToken;
   }
 
@@ -421,7 +398,7 @@ export class TransactionsService {
     let woToken: {
       status: string;
       created_at: { $gt: any; $lt: any };
-      wallet_address?: any;
+      user_wallet_address?: any;
     } = {
       status: "paid",
       created_at: { $gt: from_date, $lt: to_date },
@@ -429,7 +406,7 @@ export class TransactionsService {
     if (address !== null) {
       woToken = {
         ...woToken,
-        wallet_address: address,
+        user_wallet_address: address,
       };
     }
     const transactions = await this.transactionModel
@@ -560,10 +537,9 @@ export class TransactionsService {
     return result;
   }
   
-  async getTransactionByOredrId(orderId): Promise<any> {
+  async getTransactionByOredrId(orderId: string): Promise<any> {
     const transaction = this.transactionModel
-      .findOne({ tran_id: orderId })
-      .select("-_id -do_not_convert -orderable_type -orderable_id -lightning_network -payment_url -underpaid_amount -overpaid_amount -is_refundable -refunds -voids -fees -source -__v")
+      .findOne({ transactionHash: orderId })
       .exec();
     return transaction;
   }
@@ -571,17 +547,15 @@ export class TransactionsService {
   async getTokenCount(address?:string) {
     let whereQuery: {
       status: any;
-      wallet_address?: any;
+      user_wallet_address?: any;
     } = {
-      status: {
-        $in: ["new", "paid", "pending", "confirming"]
-      }
+      status: "paid"
     };
     if(address)
     {
       whereQuery = {
         ...whereQuery,
-        wallet_address:address
+        user_wallet_address:address
       }
     }
     const tokenCountResult = await this.transactionModel.aggregate([
@@ -593,6 +567,36 @@ export class TransactionsService {
           _id: '$price_currency',
           total: {
             $sum: { $toDouble: "$token_cryptoAmount" }
+          }
+        }
+      },
+    ]).exec();
+    return tokenCountResult;
+  }
+
+  async getUsdtCount(address?:string) {
+    let whereQuery: {
+      status: any;
+      user_wallet_address?: any;
+    } = {
+      status: "paid"
+    };
+    if(address)
+    {
+      whereQuery = {
+        ...whereQuery,
+        user_wallet_address:address
+      }
+    }
+    const tokenCountResult = await this.transactionModel.aggregate([
+      {
+        $match:whereQuery
+      },
+      {
+        $group: {
+          _id: '$price_currency',
+          total: {
+            $sum: { $toDouble: "$price_amount" }
           }
         }
       },

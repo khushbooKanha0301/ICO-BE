@@ -1,25 +1,24 @@
 import { IsArray, IsOptional, IsString } from "class-validator";
 export class CreateTransactionDto {
+
 	@IsOptional()
-	tran_id: number;
-	
+	transactionHash: string;
+
 	@IsOptional()
 	@IsString()
 	status: string;
+
+	@IsOptional()
+	@IsString()
+	user_wallet_address: string;
 	
 	@IsOptional()
 	@IsString()
-	title: string;
-
-	@IsOptional()
-	do_not_convert: boolean;
+	receiver_wallet_address: string;
 
 	@IsOptional()
 	@IsString()
-	orderable_type: string;
-
-	@IsOptional()
-	orderable_id: number;
+	network: string;
 
 	@IsOptional()
 	@IsString()
@@ -27,70 +26,49 @@ export class CreateTransactionDto {
 
 	@IsOptional()
 	@IsString()
-	price_amount: string;
-
-	@IsOptional()
-	lightning_network: boolean;
+	is_sale: boolean;
 
 	@IsOptional()
 	@IsString()
-	receive_currency: string;
+	price_amount: string;
 
 	@IsOptional()
-	receive_amount: string;
+	@IsString()
+	token_cryptoAmount: string;
 	
+	@IsOptional()
+	@IsString()
+	gasUsed: string;
+
+	@IsOptional()
+	@IsString()
+	effectiveGasPrice: string;
+
+	@IsOptional()
+	@IsString()
+	cumulativeGasUsed: string;
+
+	@IsOptional()
+	@IsString()
+	blockNumber: string;
+
+	@IsOptional()
+	@IsString()
+	blockHash: string;
+
+	@IsOptional()
+	@IsString()
+	source: string;
+
 	@IsOptional()
 	@IsString()
 	created_at: string;
 
 	@IsOptional()
 	@IsString()
-	order_id: string;
+	paid_at: string;
 
-	@IsOptional()
-    @IsString()
-    payment_url: string;
-
-	@IsOptional()
-    underpaid_amount: number;
-
-	@IsOptional()
-	@IsString()
-	overpaid_amount: string;
-
-	@IsOptional()
-	is_refundable: boolean;
-
-    @IsOptional()
-    @IsArray()
-	refunds: string[];
-
-    @IsOptional()
-	@IsArray()
-	voids: string[];
-
-    @IsOptional()
-	@IsArray()
-	fees: string[];
-
-    @IsOptional()
-	@IsString()
-	token: string;
-
-	@IsOptional()
-	@IsString()
-	transaction_status: string;
-
-	@IsOptional()
-	@IsString()
-	wallet_address: string;
-
-	@IsOptional()
-	@IsString()
-	token_cryptoAmount: string;
-
-	@IsOptional()
-	@IsString()
-	source: string;
-
+	// @IsOptional()
+	// @IsString()
+	// usd_amount: string;
 }

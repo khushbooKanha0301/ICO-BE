@@ -22,6 +22,16 @@ export class AuthenticateMiddleware implements NestMiddleware {
 
   async use(req: Request, res: Response, next: NextFunction) {
     try {
+
+      res.header('Access-Control-Allow-Origin', '*'); // Allow all origins or specify your origin
+      res.header(
+        'Access-Control-Allow-Headers',
+        'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+      );
+      res.header(
+        'Access-Control-Expose-Headers',
+        'Content-Length, 2FA, 2FA_enable , kyc_verify, kyc_status',
+      );
       // Extract the JWT token from the authorization header
       const authHeader = req.headers["authorization"];
       const token = authHeader && authHeader.split(" ")[1];

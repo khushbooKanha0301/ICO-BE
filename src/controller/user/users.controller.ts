@@ -1149,8 +1149,29 @@ export class UsersController {
         imageUrl = "data:image/jpg;base64," + imageBuffer.toString("base64");
       }
       if (!User.fname_alias) User.fname_alias = "John";
-      if (!User.lname_alias) User.lname_alias = "Doe";
+      if (!User.lname_alias) User.lname_alias = "Doe"; 
 
+      // Setting headers if properties exist
+      if (User.is_2FA_login_verified !== undefined) {
+        response.setHeader('2FA', User.is_2FA_login_verified);
+        User.is_2FA_login_verified = undefined;
+      }
+
+      if (User.is_2FA_enabled !== undefined) {
+        response.setHeader('2FA_enable', User.is_2FA_enabled);
+        User.is_2FA_enabled = undefined;
+      }
+
+      if (User.is_verified !== undefined) {
+        response.setHeader('kyc_verify', User.is_verified);
+        User.is_verified = undefined;
+      }
+
+      if (User.kyc_completed !== undefined) {
+        response.setHeader('kyc_status', User.kyc_completed);
+        User.kyc_completed = undefined;;
+      }
+      console.log("User ", User);
       return response.status(HttpStatus.OK).json({
         message: "User found successfully",
         User,

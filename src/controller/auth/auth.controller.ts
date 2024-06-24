@@ -1,15 +1,12 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpStatus,
   Param,
   Post,
-  Put,
   Res,
   Req,
-  Query,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectModel } from "@nestjs/mongoose";
@@ -17,9 +14,10 @@ import { SkipThrottle } from "@nestjs/throttler";
 import axios from "axios";
 import { Model } from "mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
+import { ISales } from "src/interface/sales.interface";
 import { TransactionsService } from "src/service/transaction/transactions.service";
 import { UserService } from "src/service/user/users.service";
-var jwt = require("jsonwebtoken");
+let jwt = require("jsonwebtoken");
 const getSignMessage = (address, nonce) => {
   return `Please sign this message for address ${address}:\n\n${nonce}`;
 };
@@ -34,14 +32,15 @@ export class AuthController {
     private readonly configService: ConfigService,
     private readonly userService: UserService,
     private readonly transactionService: TransactionsService,
-    @InjectModel("transaction") private transactionModel: Model<ITransaction>
+    @InjectModel("transaction") private transactionModel: Model<ITransaction>,
+    @InjectModel("sales") private salesModel: Model<ISales>
   ) {}
 
   /**
-   * 
-   * @param response 
-   * @param param 
-   * @returns 
+   *
+   * @param response
+   * @param param
+   * @returns
    */
   @Get("/nonce/:addressId")
   async generateToken(@Res() response, @Param() param: { addressId: string }) {
@@ -49,15 +48,15 @@ export class AuthController {
       // Generate a nonce (timestamp) for client-side authentication
       const nonce = new Date().getTime();
       const address = param.addressId;
-      
+
       // Generate a temporary token (nonce) signed with a JWT secret key
       const tempToken = jwt.sign({ nonce, address }, jwtSecret, {
         expiresIn: "120s", // Token expiration time: 120 seconds
       });
-      
+
       // Create a message for cryptographic operations using the address ID and nonce
       const message = getSignMessage(address, nonce);
-      
+
       // Send the generated token and message as a JSON response
       return response.json({ tempToken, message });
     } catch (err) {
@@ -67,9 +66,9 @@ export class AuthController {
 
   /**
    *  Retrieve user details from the userService based on the provided address
-   * @param response 
-   * @param address 
-   * @returns 
+   * @param response
+   * @param address
+   * @returns
    */
   @Get("/getuser/:address")
   async getUserDetailByAddress(
@@ -100,9 +99,9 @@ export class AuthController {
 
   /**
    * Retrieves sale graph values based on the provided options and date range.
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Post("/getSaleGrapthValues")
   async getSaleGrapthValues(@Req() req: any, @Res() response) {
@@ -142,9 +141,9 @@ export class AuthController {
 
   /**
    * Retrieves line graph values based on the provided options and date range.
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Post("/getLineGrapthValues")
   async getLineGrapthValues(@Req() req: any, @Res() response) {
@@ -183,36 +182,10 @@ export class AuthController {
   }
 
   /**
-  * Handles callback requests.
-  * @param req 
-  * @param response 
-  * @returns 
-  */
-  @Post("/callBack")
-  async callBack(@Req() req: any, @Res() response) {
-    const fields = req.body;
-    if (!fields) {
-      return response.status(HttpStatus.BAD_REQUEST).json({
-        message: "failure",
-      });
-    }
-    const trans = await this.transactionService.updateTransactionData(fields);
-    if (trans) {
-      return response.status(HttpStatus.OK).json({
-        message: "success",
-      });
-    } else {
-      return response.status(HttpStatus.BAD_REQUEST).json({
-        message: "failure",
-      });
-    }
-  }
-
-  /**
    * Retrieves the total count of MID (Merchant ID) records.
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Get("/getTotalMid")
   async getTotalMid(@Req() req: any, @Res() response) {
@@ -230,44 +203,37 @@ export class AuthController {
   }
 
   /**
-   *  Retrieves details of the cryptocurrency amount based on the provided USD amount and cryptocurrency symbol.
-   * @param req 
-   * @param response 
-   * @param body 
-   * @returns 
+   *  Retrieves details of the cryptocurrency amount based on the provided USDT amount and cryptocurrency symbol.
+   * @param req
+   * @param response
+   * @param body
+   * @returns
    */
   @Post("/getCryptoAmountDetails")
   async getCryptoAmountDetails(
     @Req() req: any,
     @Res() response,
-    @Body() body: { usdAmount: any; cryptoSymbol: any }
+    @Body() body: { usdtAmount: any; cryptoSymbol: any }
   ) {
     try {
-      if (!req.body.cryptoSymbol) {
-        return response.status(HttpStatus.BAD_REQUEST).json({
-          message: "Please select crypto currency",
+      const sales = await this.transactionService.getSales();
+      let cryptoAmount = 0;
+      if (sales && sales.amount) {
+        cryptoAmount = req.body.usdtAmount / sales.amount;
+      }
+
+      if (cryptoAmount) {
+        return response.status(HttpStatus.OK).json({
+          message: `USDT: ${req.body.usdtAmount} => MID: ${cryptoAmount.toFixed(
+            2
+          )}`,
+          amount: cryptoAmount.toFixed(2)
         });
       } else {
-        let cryptoAmount = null;
-        if (req.body.cryptoSymbol == "USD") {
-          cryptoAmount = body.usdAmount * 0.49;
-        } else {
-          let responseData = await axios.get(
-            `https://api.coingate.com/v2/rates/merchant/${req.body.cryptoSymbol}/USD`
-          );
-          let amountUSD = body.usdAmount * responseData.data;
-          cryptoAmount = amountUSD * 0.49;
-        }
-        if (cryptoAmount) {
-          return response.status(HttpStatus.OK).json({
-            message: `${req.body.cryptoSymbol}: ${req.body.usdAmount} => MID: ${cryptoAmount}`,
-            amount: cryptoAmount,
-          });
-        } else {
-          return response.status(HttpStatus.OK).json({
-            message: "Something went wrong",
-          });
-        }
+        return response.status(HttpStatus.OK).json({
+          message: "Something went wrong",
+          amount: cryptoAmount.toFixed(2), // Ensure to handle cases where cryptoAmount is 0
+        });
       }
     } catch (err) {
       return response.status(err.status).json(err.response);

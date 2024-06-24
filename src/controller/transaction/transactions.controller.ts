@@ -1,20 +1,15 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpStatus,
   Param,
   Post,
   Put,
   Res,
-  Req,
-  Query,
-  UseInterceptors,
-  UploadedFile,
-  UploadedFiles,
+  Req
 } from "@nestjs/common";
-import axios from "axios";
+import * as moment from "moment";
 import { TransactionsService } from "src/service/transaction/transactions.service";
 import { ConfigService } from "@nestjs/config";
 import { UserService } from "src/service/user/users.service";
@@ -22,16 +17,139 @@ import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { SkipThrottle } from "@nestjs/throttler";
+import { ISales } from "src/interface/sales.interface";
+import { IUser } from "src/interface/users.interface";
 
 @SkipThrottle()
 @Controller("transactions")
 export class TransactionsController {
   constructor(
-    private readonly configService: ConfigService,
     private readonly transactionService: TransactionsService,
     private readonly userService: UserService,
-    @InjectModel("transaction") private transactionModel: Model<ITransaction>
+    @InjectModel("transaction") private transactionModel: Model<ITransaction>,
+    @InjectModel("sales") private salesModel: Model<ISales>,
+    @InjectModel("user") private usersModel: Model<IUser>,
   ) {}
+
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
+  @SkipThrottle(false)
+  @Post("/verifyToken")
+  async verifyToken(@Req() req: any, @Res() response) {
+    try{
+      if (!req.body?.wallet_address) {
+        return response
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ status: "failure", message: "Wallet address is missing" });
+      }
+      
+      const user = await this.userService.getFindbyAddress(
+        req.body?.wallet_address
+      );
+     
+      if (!user) {
+        return response
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ status: "failure", message: "Wallet address does not exist" });
+      }
+  
+      if (!user?.kyc_completed) {
+        return response
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ status: "failure", message: "Please complete KYC to Buy Token" });
+      }
+  
+      if (!(user?.kyc_completed === true && user?.is_verified === 1)) {
+        return response
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ status: "failure", message: "Your KYC is not verified by admin" });
+      }
+  
+      if (user?.status === "Suspend") {
+        return response
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ status: "failure", message: "Can't Buy Token, You are Suspended by Admin." });
+      }
+  
+      if (!req.body?.cryptoAmount) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          status: "failure",
+          message: "Crypto amount is missing",
+        });
+      }
+  
+      if (!req.body?.amount) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          status: "failure",
+          message: "Amount is missing",
+        });
+      }
+  
+      let userPurchaseMid = await this.transactionService.getTotalMidCount();
+      //userPurchaseMid = req.body?.cryptoAmount + userPurchaseMid;
+      
+      const sales = await this.transactionService.getSales()
+      let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
+      if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          status: "failure",
+          message: "Something Went Wrong."
+        });
+      }
+    
+      const remainingMid = sales.total_token - userPurchaseMid;
+      if (remainingMid <= 0) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          status: "failure",
+          message: "Token Balance is empty",
+        });
+      }
+  
+      if (remainingMid - req.body?.cryptoAmount < 0) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          status: "failure",
+          message: "All Tokens are sold",
+        });
+      }
+      
+      if (remainingMid) {
+        return response.status(HttpStatus.OK).json({
+          status: "success"
+        });
+      } else {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          message: "Something went wrong",
+        });
+      }
+    }
+    catch (err) {
+      return response.status(HttpStatus.BAD_REQUEST).json(err.response);
+    }
+  }
+
+
+  @SkipThrottle(false)
+  @Post("/verifyTransaction")
+  async verifyTransaction(@Req() req: any, @Res() response) {
+    try {
+      const transactionHashes = req.body.transactionHashs;
+
+      const userTransactions = await transactionHashes.map(async (tx) => {
+        const data= await this.transactionService.getTransactionByOredrId(tx);        
+          if(!data)  return tx;
+      })
+      return userTransactions;
+    }
+    catch(error){
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        message: "Something went wrong",
+      });
+    }
+  }
 
   /**
    * This API endpoint is used to create an order for purchasing tokens.
@@ -42,20 +160,38 @@ export class TransactionsController {
   @SkipThrottle(false)
   @Post("/createOrder")
   async createOrder(@Req() req: any, @Res() response) {
-    if (!req.body?.wallet_address) {
+    if (!req.body?.user_wallet_address) {
       return response
       .status(HttpStatus.BAD_REQUEST)
       .json({ status: "failure", message: "Wallet address is missing" });
     }
+    if (!req.body?.transactionHash) {
+      return response
+      .status(HttpStatus.BAD_REQUEST)
+      .json({ status: "failure", message: "Transaction Id is missing" });
+    }
 
     const user = await this.userService.getFindbyAddress(
-      req.body?.wallet_address
+      req.body?.user_wallet_address
     );
-
+    console.log("user", user);
+    
     if (!user) {
       return response
       .status(HttpStatus.BAD_REQUEST)
       .json({ status: "failure", message: "Wallet address does not exist" });
+    }
+
+    if (!user?.kyc_completed) {
+      return response
+      .status(HttpStatus.BAD_REQUEST)
+      .json({ status: "failure", message: "Please complete KYC to Buy Token" });
+    }
+
+    if (!(user?.kyc_completed === true && user?.is_verified === 1)) {
+      return response
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ status: "failure", message: "Your KYC is not verified by admin" });
     }
 
     if (user?.status === "Suspend") {
@@ -65,10 +201,10 @@ export class TransactionsController {
 
     }
 
-    if (!req.body?.crypto_currency) {
+    if (!req.body?.network) {
       return response.status(HttpStatus.BAD_REQUEST).json({
         status: "failure",
-        message: "Crypto currency is missing",
+        message: "Network is missing",
       });
     }
 
@@ -86,9 +222,22 @@ export class TransactionsController {
       });
     }
 
-    const raisedMid = await this.transactionService.getTotalMidCount();
-    const remainingMid = 14000000 - raisedMid;
+    let userPurchaseMid = await this.transactionService.getTotalMidCount();
+    userPurchaseMid = req.body?.cryptoAmount + userPurchaseMid;
+    const sales = await this.transactionService.getSales()
 
+    let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
+    if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        status: "failure",
+        message: "Something Went Wrong."
+      });
+    }
+  
+    const remainingMid = sales.total_token - userPurchaseMid;
+    const updatedSalevalues = { $set: { remaining_token: remainingMid } };
+    await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+    
     if (remainingMid <= 0) {
       return response.status(HttpStatus.BAD_REQUEST).json({
         status: "failure",
@@ -99,57 +248,192 @@ export class TransactionsController {
     if (remainingMid - req.body?.cryptoAmount < 0) {
       return response.status(HttpStatus.BAD_REQUEST).json({
         status: "failure",
-        message: "Token Balance is empty",
+        message: "All Tokens are sold",
       });
     }
+    let source;
+    if(user && user?.referred_by){
+      source = "referral"
+    } else {
+      source= "purchase"
+    }
 
-    let responseData = await axios.get(
-      `https://api.coingate.com/v2/rates/merchant/${req.body.crypto_currency}/USD`
-    );
-    let amountUSD = req.body?.amount * responseData.data;
-    let apiCryptoAmount = amountUSD * 0.49;
+    const transactionData = {
+      transactionHash: req.body?.transactionHash,
+      status: "pending",
+      user_wallet_address: req.body?.user_wallet_address,
+      receiver_wallet_address: req.body?.receiver_wallet_address,
+      network : req.body?.network,
+      price_currency: "USDT",
+      is_sale: true,
+      price_amount: req.body?.amount,
+      token_cryptoAmount :cryptoAmount,
+      gasUsed :req.body?.gasUsed,
+      effectiveGasPrice : req.body?.effectiveGasPrice,
+      cumulativeGasUsed : req.body?.cumulativeGasUsed,
+      blockNumber :req.body?.blockNumber,
+      blockHash : req.body?.blockHash,
+      created_at: moment.utc().format(),
+      source: source
+    }
     
-    if(apiCryptoAmount != req.body?.cryptoAmount)
-    {
-      return response.status(HttpStatus.BAD_REQUEST).json({
-        message: "Something Went Wrong.",
-      });
-    }
-
-    const coingate_token = this.configService.get("coingate_token");
-    const res = await axios.post(
-      "https://api-sandbox.coingate.com/v2/orders",
-      {
-        price_amount: Number(req.body?.amount),
-        price_currency: req.body?.crypto_currency,
-        receive_currency: "USD",
-        callback_url: "http://164.90.183.188:5000/orders/callback",
-        success_url: "https://ico.middn.com/buy-token?success=true",
-        cancel_url: "https://ico.middn.com/buy-token?success=false",
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${coingate_token}`,
-        },
-      }
-    );
     const transaction = await this.transactionService.createTransaction(
-      res.data,
-      req.body?.wallet_address,
-      req.body?.cryptoAmount,
-      amountUSD
+      transactionData
     );
     if (transaction) {
       return response.status(HttpStatus.OK).json({
-        message: "Order create successfully",
+        message: "Order Created Successfully",
         transaction: {
-          tran_id:transaction.tran_id,
-          payment_url:transaction.payment_url
+          transactionHash:transaction.transactionHash
         },
       });
     } else {
       return response.status(HttpStatus.BAD_REQUEST).json({
         message: "Something went wrong",
+      });
+    }
+  }
+
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
+  @SkipThrottle(false)
+  @Put("/updateOrder")
+  async updateOrder(@Req() req: any, @Res() response) {
+    try{
+      const transData = {
+        status: req.body.status,
+        paid_at : moment.utc().format()
+      }
+      await this.transactionService.updateTransactionData(req.body.transactionHash , transData);
+      const userTrans = await this.transactionService.getTransactionByOredrId(req.body.transactionHash);
+      const sales = await this.transactionService.getSales()
+      if(req.body.status == 'paid') {
+
+        const referredFromUser = await this.usersModel.findOne({
+          wallet_address: userTrans.user_wallet_address,
+        });
+
+        const referredWalletAddress = referredFromUser.referred_by;
+        const totalUserTrans = await this.transactionModel.countDocuments({
+          user_wallet_address: userTrans.user_wallet_address,
+          status: "paid",
+        });
+         
+        if (userTrans.status == "paid" && totalUserTrans == 1 && referredWalletAddress) {
+          let priceAmount = String(userTrans.price_amount * (10 / 100));
+          let cryptoAmount = String(userTrans.token_cryptoAmount * (10 / 100));
+          // let usdAmount = String(userTrans.usd_amount * (10 / 100));
+          
+          const referredByUserDetails = await this.usersModel.findOne({
+            _id: new Object(referredWalletAddress),
+          });
+          let orderDocument = {
+            status: "paid",
+            price_currency: "USDT",
+            price_amount: priceAmount,
+            network: userTrans.network,
+            created_at: moment.utc().format(),
+            user_wallet_address: referredByUserDetails?.wallet_address,
+            token_cryptoAmount: cryptoAmount,
+            source: "referral"
+          };
+          const trans = await this.transactionService.createTransaction(
+            orderDocument
+          );
+
+          if(trans) {
+            const updatedSalevalues = { $set: { user_purchase_token: (Number(sales?.user_purchase_token) + Number(cryptoAmount)) ,
+              remaining_token : (Number(sales?.remaining_token) - Number(cryptoAmount))
+              }};
+
+            const salesUpdate = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+            if (salesUpdate) {
+              return response.status(HttpStatus.OK).json({
+                message: "success",
+              });
+            }
+          }
+        } else {
+          const userPurchased = (Number(sales?.user_purchase_token) +  Number(userTrans.token_cryptoAmount)) ;
+          const updatedSalevalues = { $set: { user_purchase_token: userPurchased } };
+          const trans = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+          if (trans) {
+            return response.status(HttpStatus.OK).json({
+              message: "success",
+            });
+          }
+        }
+      } else {
+        const userPurchased = (Number(sales?.remaining_token) + Number(userTrans.token_cryptoAmount));
+          const updatedSalevalues = { $set: { remaining_token: userPurchased } };
+          const trans = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+          if (trans) {
+            return response.status(HttpStatus.OK).json({
+              message: "failed",
+            });
+          }
+      }
+    } catch(error) {
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        message: "Something went wrong",
+      });
+    }
+  }
+
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
+  @Get("/checkCurrentSale")
+  async checkCurrentSale(@Req() req: any, @Res() response) {
+    const sales = await this.transactionService.getSales()
+    if (sales) { 
+      return response.status(HttpStatus.OK).json({
+        message: "Sales get successfully",
+        sales: sales
+      });
+    } else {
+      return response.status(HttpStatus.OK).json({
+        message: "Sale Not Found",
+        sales: null
+      });
+    }
+  }
+
+  @Get("/getAllSales")
+  async getAllSales(@Req() req: any, @Res() response) {
+    const sales = await this.transactionService.getAllSales()
+    if (sales) { 
+      return response.status(HttpStatus.OK).json({
+        message: "Sales get successfully",
+        sales: sales
+      });
+    } else {
+      return response.status(HttpStatus.OK).json({
+        message: "Sale Not Found",
+        sales: null
+      });
+    }
+  }
+
+  @Get("/getPurchasedToken")
+  async getPurchasedToken(@Req() req: any, @Res() response) {
+    const sales = await this.transactionService.getSales()
+    if (sales) { 
+      return response.status(HttpStatus.OK).json({
+        message: "Sales get successfully",
+        sales: sales
+      });
+    } else {
+      return response.status(HttpStatus.OK).json({
+        message: "Sale Not Found",
+        sales: null
       });
     }
   }
@@ -211,16 +495,28 @@ export class TransactionsController {
       currencyData = currencyData.map((obj) => {
         return { [obj._id]: obj.total };
       });
-      currencyData = Object.assign({}, ...currencyData);
-      const tokenData = {
-        gbpCount: currencyData["GBP"] ? currencyData["GBP"].toFixed(2) : "0.00",
-        audCount: currencyData["AUD"] ? currencyData["AUD"].toFixed(2) : "0.00",
-        eurCount: currencyData["EUR"] ? currencyData["EUR"].toFixed(2) : "0.00",
-      };
-      if (tokenData) {
+      currencyData = Object.assign({}, ...currencyData);  
+      const totalUserCount = currencyData["USDT"] ? currencyData["USDT"].toFixed(2) : "0.00"
+      
+      let usdtData = await this.transactionService.getUsdtCount(
+        req.headers.authData.verifiedAddress
+      );
+
+      usdtData = usdtData.map((obj) => {
+        return { [obj._id]: obj.total };
+      });
+      usdtData = Object.assign({}, ...usdtData);  
+      const totalUsdtCount = usdtData["USDT"] ? usdtData["USDT"].toFixed(2) : "0.00";
+
+      const totalTokenCount = {
+        totalUserCount: totalUserCount,
+        totalUsdtCount: totalUsdtCount
+      }
+
+      if (totalUserCount) {
         return response.status(HttpStatus.OK).json({
           message: "get TotalAmount Amount Successfully",
-          tokenData: tokenData,
+          totalTokenCount: totalTokenCount,
         });
       } else {
         return response.status(HttpStatus.BAD_REQUEST).json({

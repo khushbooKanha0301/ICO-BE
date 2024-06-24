@@ -150,7 +150,7 @@ export class UserService {
   async getUser(userId: string): Promise<any> {
     const existingUser = await this.userModel
       .findById(userId)
-      .select("-_id -__v -nonce -referred_by -is_kyc_deleted -google_auth_secret -admin_checked_at -kyc_submitted_date")
+      .select("-_id -__v -nonce -referred_by -is_kyc_deleted -google_auth_secret -admin_checked_at -kyc_submitted_date -wallet_address -status")
       .exec();
     if (!existingUser) {
       throw new NotFoundException(`User #${userId} not found`);

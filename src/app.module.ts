@@ -1,4 +1,4 @@
-import { Module, MiddlewareConsumer, RequestMethod } from "@nestjs/common";
+import { Module, MiddlewareConsumer } from "@nestjs/common";
 import { MongooseModule } from "@nestjs/mongoose";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -11,6 +11,7 @@ import { ConfigModule } from "@nestjs/config";
 import configuration from "./config/configuration";
 import { TokenService } from "./service/token/token.service";
 import { TokenSchema } from "./schema/token.schema";
+import { SalesSchema } from "./schema/sales.schema";
 import { TransactionsController } from "./controller/transaction/transactions.controller";
 import { TransactionsService } from "./service/transaction/transactions.service";
 import { TransactionSchema } from "./schema/transaction.schema";
@@ -22,6 +23,7 @@ import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middlewar
   imports: [
     MongooseModule.forRoot("mongodb://127.0.0.1:27017/ico"),
     MongooseModule.forFeature([{ name: "user", schema: UserSchema }]),
+    MongooseModule.forFeature([{ name: "sales", schema: SalesSchema }]),
     MongooseModule.forFeature([{ name: "token", schema: TokenSchema }]),
     MongooseModule.forFeature([
       { name: "transaction", schema: TransactionSchema },
@@ -52,6 +54,7 @@ import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middlewar
     },
   ],
 })
+
 export class AppModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(AuthenticateMiddleware).forRoutes("/users", "/transactions");
