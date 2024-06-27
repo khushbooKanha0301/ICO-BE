@@ -52,7 +52,10 @@ export class Transaction {
 	@Prop()
 	source: string;
 
-	// @Prop()
-	// usd_amount: string;
+	@Prop()
+	sale_name: string;
+
+	@Prop()
+	sale_type: string;
 }	
 export const TransactionSchema = SchemaFactory.createForClass(Transaction);

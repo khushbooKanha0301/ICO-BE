@@ -7,7 +7,7 @@ import { UpdateUserProfileDto } from "src/dto/update-users-profile.dto";
 import { ConfigService } from "@nestjs/config";
 import { UpdateAccountSettingsDto } from "src/dto/update-account-settings.dto";
 import { UpdateKycDataDto } from "src/dto/update-kyc.dto";
-const moment = require('moment');
+import moment from "moment";
 
 @Injectable()
 export class UserService {

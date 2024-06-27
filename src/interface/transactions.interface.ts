@@ -17,5 +17,6 @@ export interface ITransaction extends Document{
     readonly source : string;
     readonly created_at: string;
     readonly paid_at: string;
-    // readonly usd_amount: string; 
+    readonly sale_name: string; 
+    readonly sale_type: string;
 }

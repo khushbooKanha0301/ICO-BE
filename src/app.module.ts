@@ -18,6 +18,7 @@ import { TransactionSchema } from "./schema/transaction.schema";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middleware";
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { CustomThrottleMiddleware } from "./middleware/custom-throttle.middlewar
       ttl: 5,
       limit: 5,
     }),
+    ScheduleModule.forRoot(),
   ],
   controllers: [
     AppController,

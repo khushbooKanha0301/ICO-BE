@@ -9,9 +9,8 @@ import {
   Res,
   Req
 } from "@nestjs/common";
-import * as moment from "moment";
+import moment from "moment";
 import { TransactionsService } from "src/service/transaction/transactions.service";
-import { ConfigService } from "@nestjs/config";
 import { UserService } from "src/service/user/users.service";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
@@ -88,11 +87,8 @@ export class TransactionsController {
           message: "Amount is missing",
         });
       }
-  
-      let userPurchaseMid = await this.transactionService.getTotalMidCount();
-      //userPurchaseMid = req.body?.cryptoAmount + userPurchaseMid;
-      
       const sales = await this.transactionService.getSales()
+      let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
       let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
       if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
         return response.status(HttpStatus.BAD_REQUEST).json({
@@ -131,26 +127,6 @@ export class TransactionsController {
     }
   }
 
-
-  @SkipThrottle(false)
-  @Post("/verifyTransaction")
-  async verifyTransaction(@Req() req: any, @Res() response) {
-    try {
-      const transactionHashes = req.body.transactionHashs;
-
-      const userTransactions = await transactionHashes.map(async (tx) => {
-        const data= await this.transactionService.getTransactionByOredrId(tx);        
-          if(!data)  return tx;
-      })
-      return userTransactions;
-    }
-    catch(error){
-      return response.status(HttpStatus.BAD_REQUEST).json({
-        message: "Something went wrong",
-      });
-    }
-  }
-
   /**
    * This API endpoint is used to create an order for purchasing tokens.
    * @param req 
@@ -174,7 +150,6 @@ export class TransactionsController {
     const user = await this.userService.getFindbyAddress(
       req.body?.user_wallet_address
     );
-    console.log("user", user);
     
     if (!user) {
       return response
@@ -221,10 +196,9 @@ export class TransactionsController {
         message: "Amount is missing",
       });
     }
-
-    let userPurchaseMid = await this.transactionService.getTotalMidCount();
-    userPurchaseMid = req.body?.cryptoAmount + userPurchaseMid;
     const sales = await this.transactionService.getSales()
+    let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
+    userPurchaseMid = req.body?.cryptoAmount.toFixed(2) + userPurchaseMid;
 
     let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
     if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
@@ -274,7 +248,9 @@ export class TransactionsController {
       blockNumber :req.body?.blockNumber,
       blockHash : req.body?.blockHash,
       created_at: moment.utc().format(),
-      source: source
+      source: source,
+      sale_name: sales.name,
+      sale_type: "website"
     }
     
     const transaction = await this.transactionService.createTransaction(
@@ -321,24 +297,26 @@ export class TransactionsController {
         const totalUserTrans = await this.transactionModel.countDocuments({
           user_wallet_address: userTrans.user_wallet_address,
           status: "paid",
+          is_sale: true
         });
          
         if (userTrans.status == "paid" && totalUserTrans == 1 && referredWalletAddress) {
-          let priceAmount = String(userTrans.price_amount * (10 / 100));
-          let cryptoAmount = String(userTrans.token_cryptoAmount * (10 / 100));
-          // let usdAmount = String(userTrans.usd_amount * (10 / 100));
+          
+          let priceAmount = Math.round(userTrans.price_amount * (10 / 100));
+          let cryptoAmount = Math.round(userTrans.token_cryptoAmount * (10 / 100));
           
           const referredByUserDetails = await this.usersModel.findOne({
             _id: new Object(referredWalletAddress),
           });
           let orderDocument = {
             status: "paid",
+            is_sale: sales ? true : false,
             price_currency: "USDT",
             price_amount: priceAmount,
             network: userTrans.network,
             created_at: moment.utc().format(),
             user_wallet_address: referredByUserDetails?.wallet_address,
-            token_cryptoAmount: cryptoAmount,
+            token_cryptoAmount: cryptoAmount.toFixed(2),
             source: "referral"
           };
           const trans = await this.transactionService.createTransaction(
@@ -346,8 +324,8 @@ export class TransactionsController {
           );
 
           if(trans) {
-            const updatedSalevalues = { $set: { user_purchase_token: (Number(sales?.user_purchase_token) + Number(cryptoAmount)) ,
-              remaining_token : (Number(sales?.remaining_token) - Number(cryptoAmount))
+            const updatedSalevalues = { $set: { user_purchase_token: (Number(sales?.user_purchase_token) + Number(cryptoAmount.toFixed(2))) ,
+              remaining_token : (Number(sales?.remaining_token) - Number(cryptoAmount.toFixed(2)))
               }};
 
             const salesUpdate = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
@@ -359,7 +337,7 @@ export class TransactionsController {
           }
         } else {
           const userPurchased = (Number(sales?.user_purchase_token) +  Number(userTrans.token_cryptoAmount)) ;
-          const updatedSalevalues = { $set: { user_purchase_token: userPurchased } };
+          const updatedSalevalues = { $set: { user_purchase_token: userPurchased.toFixed(2) } };
           const trans = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
           if (trans) {
             return response.status(HttpStatus.OK).json({

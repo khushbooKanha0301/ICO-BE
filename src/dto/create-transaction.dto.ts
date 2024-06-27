@@ -68,7 +68,11 @@ export class CreateTransactionDto {
 	@IsString()
 	paid_at: string;
 
-	// @IsOptional()
-	// @IsString()
-	// usd_amount: string;
+	@IsOptional()
+	@IsString()
+	sale_name: string;
+
+	@IsOptional()
+	@IsString()
+	sale_type: string;
 }

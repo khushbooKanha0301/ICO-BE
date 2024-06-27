@@ -190,7 +190,7 @@ export class AuthController {
   @Get("/getTotalMid")
   async getTotalMid(@Req() req: any, @Res() response) {
     try {
-      let totalAmount = await this.transactionService.getTotalMidCount();
+      let totalAmount = await this.transactionService.getTotalMidOverAllCount();
       return response.status(HttpStatus.OK).json({
         message: "get TotalAmount Amount Successfully",
         totalAmount: totalAmount,

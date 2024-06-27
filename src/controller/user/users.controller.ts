@@ -26,7 +26,7 @@ import { UpdateKycDataDto } from "src/dto/update-kyc.dto";
 import { SkipThrottle } from "@nestjs/throttler";
 import { TransactionsService } from "src/service/transaction/transactions.service";
 const rp = require("request-promise-native");
-const moment = require("moment");
+import moment from "moment";
 const speakeasy = require("speakeasy");
 
 var jwt = require("jsonwebtoken");
@@ -1171,7 +1171,6 @@ export class UsersController {
         response.setHeader('kyc_status', User.kyc_completed);
         User.kyc_completed = undefined;;
       }
-      console.log("User ", User);
       return response.status(HttpStatus.OK).json({
         message: "User found successfully",
         User,

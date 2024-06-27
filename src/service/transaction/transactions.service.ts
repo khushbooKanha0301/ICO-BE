@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { ITransaction } from "src/interface/transactions.interface";
 import { Model } from "mongoose";
-import * as moment from "moment";
+import moment from "moment";
 import { IUser } from "src/interface/users.interface";
 import { ISales } from "src/interface/sales.interface";
 
@@ -19,53 +19,114 @@ export class TransactionsService {
     return newTransaction.save();
   }
 
-  async getSales(){
+  async getSales() {
     const currentDate = moment.utc().format();
-    return  await this.salesModel.findOne({
-      $and: [
-        { start_sale: { $lte: currentDate } }, 
-        { end_sale: { $gte: currentDate } } 
-      ]
-    }).exec();
+    return await this.salesModel
+      .findOne({
+        $and: [
+          { start_sale: { $lte: currentDate } },
+          { end_sale: { $gte: currentDate } },
+        ],
+      })
+    .exec();
   }
 
-  async getAllSales(){
-    return  await this.salesModel.find().exec();
+  async checkOutsideSales(currentDate) {
+    return await this.salesModel
+      .findOne({
+        $and: [
+          { start_sale: { $lte: currentDate } },
+          { end_sale: { $gte: currentDate } },
+        ],
+      })
+      .exec();
   }
 
+  async getAllSales() {
+    return await this.salesModel.find().exec();
+  }
 
   async getNearestSale() {
     const currentDate = moment.utc();
     const allSales = await this.salesModel.find().exec();
 
     if (allSales.length === 0) {
-        return null; // No sales found
+      return null; // No sales found
     }
 
     // Filter out sales that have already ended before the current date
-    const validSales = allSales.filter(sale => moment(sale.end_sale).isAfter(currentDate));
+    const validSales = allSales.filter((sale) =>
+      moment(sale.end_sale).isAfter(currentDate)
+    );
     if (validSales.length === 0) {
-        return null; // No valid sales found
+      return null; // No valid sales found
     }
 
     // Calculate the nearest sale date among the valid sales
     const nearestSale = validSales.reduce((nearest, sale) => {
-        const startDiff = Math.abs(currentDate.diff(moment(sale.start_sale)));
-        const endDiff = Math.abs(currentDate.diff(moment(sale.end_sale)));
-        
-        const nearestDiff = Math.min(startDiff, endDiff);
-        const currentDiff = nearest ? Math.min(Math.abs(currentDate.diff(moment(nearest.start_sale))), Math.abs(currentDate.diff(moment(nearest.end_sale)))) : Infinity;
-        
-        return nearestDiff < currentDiff ? sale : nearest;
+      const startDiff = Math.abs(currentDate.diff(moment(sale.start_sale)));
+      const endDiff = Math.abs(currentDate.diff(moment(sale.end_sale)));
+
+      const nearestDiff = Math.min(startDiff, endDiff);
+      const currentDiff = nearest
+        ? Math.min(
+            Math.abs(currentDate.diff(moment(nearest.start_sale))),
+            Math.abs(currentDate.diff(moment(nearest.end_sale)))
+          )
+        : Infinity;
+
+      return nearestDiff < currentDiff ? sale : nearest;
     }, null);
     return nearestSale;
   }
 
-  async updateTransactionData(transactionHash : string, fields:any):Promise<any>
-  {
+  async checkOutsideNearSales(momentDate) {
+    const formattedDate = moment.utc(momentDate);
+    const currentDateFormatted = formattedDate.format("YYYY-MM-DDTHH:mm:ss[Z]");
+
+    const allSales = await this.salesModel.find().exec();
+
+    if (allSales.length === 0) {
+      return null; // No sales found
+    }
+
+    // Filter out sales that have already ended before the current date
+    const validSales = allSales.filter((sale) =>
+      moment(sale.end_sale).isAfter(momentDate)
+    );
+    if (validSales.length === 0) {
+      return null; // No valid sales found
+    }
+
+    // Calculate the nearest sale date among the valid sales
+    const nearestSale = validSales.reduce((nearest, sale) => {
+      const startDiff = Math.abs(formattedDate.diff(moment(sale.start_sale)));
+      const endDiff = Math.abs(formattedDate.diff(moment(sale.end_sale)));
+
+      const nearestDiff = Math.min(startDiff, endDiff);
+      const currentDiff = nearest
+        ? Math.min(
+            Math.abs(formattedDate.diff(moment(nearest.start_sale))),
+            Math.abs(formattedDate.diff(moment(nearest.end_sale)))
+          )
+        : Infinity;
+
+      return nearestDiff < currentDiff ? sale : nearest;
+    }, null);
+
+    return nearestSale;
+  }
+
+  async updateTransactionData(
+    transactionHash: string,
+    fields: any
+  ): Promise<any> {
     const updatedvalues = { $set: fields };
     if (transactionHash) {
-      const trans = await this.transactionModel.updateOne({transactionHash : transactionHash}, updatedvalues);
+      const trans = await this.transactionModel.updateOne(
+        { transactionHash: transactionHash },
+        updatedvalues
+      );
       return trans;
     }
     return null;
@@ -75,23 +136,27 @@ export class TransactionsService {
     address: string,
     page?: number,
     pageSize?: number,
-    typeFilter?:any,
-    statusFilter?:any
+    typeFilter?: any,
+    statusFilter?: any
   ): Promise<any> {
     let transactionsQuery = this.transactionModel.find();
-    if(address)
-    {
-      transactionsQuery = transactionsQuery.where({user_wallet_address:address});
+    if (address) {
+      transactionsQuery = transactionsQuery.where({
+        user_wallet_address: address,
+      });
     }
     // source add
-    if(typeFilter && typeFilter.length > 0)
-    {
-      transactionsQuery = transactionsQuery.where({source:{$in: typeFilter}});
+    if (typeFilter && typeFilter.length > 0) {
+      transactionsQuery = transactionsQuery.where({
+        source: { $in: typeFilter },
+      });
     }
-    if(statusFilter && statusFilter.length > 0)
-      {
-        transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
-      }
+    if (statusFilter && statusFilter.length > 0) {
+      transactionsQuery = transactionsQuery.where({
+        status: { $in: statusFilter },
+      });
+    }
+    
     if (page && pageSize) {
       // Calculate the number of documents to skip
       const skipCount = (page - 1) * pageSize;
@@ -107,58 +172,113 @@ export class TransactionsService {
     return transactions;
   }
 
-  async getTotalMidCount(){
-    const midCountResult = await this.transactionModel.aggregate([
-      {
-        $match: {
-          status: "paid"
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total: {
-            $sum: { $toDouble: "$token_cryptoAmount" }
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          totalAmount: { $round: ["$total", 2] },
+  async getTotalMidCount(name) {
+    const midCountResult = await this.transactionModel
+      .aggregate([
+        {
+          $match: {
+            status: "paid",
+            is_sale: true,
+            sale_name: name,
+          },
         },
-      },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $first: "$totalAmount" }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          totalAmount: { $ifNull: ["$totalAmount", 0] }
-        }
-      }
-    ]).exec();
-  
-    return (midCountResult && midCountResult[0]?.totalAmount)? midCountResult[0].totalAmount: 0;
+        {
+          $group: {
+            _id: null,
+            total: {
+              $sum: { $toDouble: "$token_cryptoAmount" },
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalAmount: { $round: ["$total", 2] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $first: "$totalAmount" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalAmount: { $ifNull: ["$totalAmount", 0] },
+          },
+        },
+      ])
+      .exec();
+
+    return midCountResult && midCountResult[0]?.totalAmount
+      ? midCountResult[0].totalAmount
+      : 0;
   }
 
-  async getTransactionCount(address: string,typeFilter?:any[],statusFilter?:any[]) {
+  async getTotalMidOverAllCount() {
+    const midCountResult = await this.transactionModel
+      .aggregate([
+        {
+          $match: {
+            status: "paid"
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: {
+              $sum: { $toDouble: "$token_cryptoAmount" },
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalAmount: { $round: ["$total", 2] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $first: "$totalAmount" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalAmount: { $ifNull: ["$totalAmount", 0] },
+          },
+        },
+      ])
+      .exec();
+
+    return midCountResult && midCountResult[0]?.totalAmount
+      ? midCountResult[0].totalAmount
+      : 0;
+  }
+
+  async getTransactionCount(
+    address: string,
+    typeFilter?: any[],
+    statusFilter?: any[]
+  ) {
     let transactionsQuery = this.transactionModel.find();
-    if(address)
-    {
-      transactionsQuery = transactionsQuery.where({user_wallet_address:address});
+    if (address) {
+      transactionsQuery = transactionsQuery.where({
+        user_wallet_address: address,
+      });
     }
-    if(typeFilter && typeFilter.length > 0)
-    {
-      transactionsQuery = transactionsQuery.where({source:{$in: typeFilter}});
+    if (typeFilter && typeFilter.length > 0) {
+      transactionsQuery = transactionsQuery.where({
+        source: { $in: typeFilter },
+      });
     }
-    if(statusFilter && statusFilter.length > 0)
-      {
-        transactionsQuery = transactionsQuery.where({status:{$in: statusFilter}});
-      }
+    if (statusFilter && statusFilter.length > 0) {
+      transactionsQuery = transactionsQuery.where({
+        status: { $in: statusFilter },
+      });
+    }
    
     const count = await transactionsQuery.countDocuments();
     return count;
@@ -171,10 +291,12 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     if (address !== null) {
@@ -210,10 +332,12 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     if (address !== null) {
@@ -315,7 +439,7 @@ export class TransactionsService {
         const formattedMonth = previousMonth.format("YYYY-MM");
         mainDates.push(formattedMonth);
       }
-    } 
+    }
     if (filterType === "thisMonthDate") {
       // Calculate dates for the current month
       const thisMonthStart = moment().startOf("month");
@@ -326,13 +450,13 @@ export class TransactionsService {
         mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
         currentDatePointer.add(1, "day");
       }
-    } 
+    }
     if (filterType === "thisYearDate") {
-      const currentYear = moment().year()
+      const currentYear = moment().year();
       for (let i = 0; i < 12; i++) {
-        const thisMonth = moment().year(currentYear).month(i)
-        const formattedMonth = thisMonth.format('YYYY-MM')
-        mainDates.push(formattedMonth)
+        const thisMonth = moment().year(currentYear).month(i);
+        const formattedMonth = thisMonth.format("YYYY-MM");
+        mainDates.push(formattedMonth);
       }
     }
 
@@ -359,10 +483,12 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     if (address !== null) {
@@ -385,7 +511,8 @@ export class TransactionsService {
         },
       ])
       .exec();
-    totalToken = totalToken.length && totalToken[0] ? totalToken[0].totalToken : 0;
+    totalToken =
+      totalToken.length && totalToken[0] ? totalToken[0].totalToken : 0;
     return totalToken;
   }
 
@@ -397,10 +524,12 @@ export class TransactionsService {
   ): Promise<any> {
     let woToken: {
       status: string;
+      is_sale: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
+      is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     if (address !== null) {
@@ -511,13 +640,13 @@ export class TransactionsService {
         mainDates.push(currentDatePointer.format("YYYY-MM-DD"));
         currentDatePointer.add(1, "day");
       }
-    } 
+    }
     if (filterType === "thisYearDate") {
-      const currentYear = moment().year()
+      const currentYear = moment().year();
       for (let i = 0; i < 12; i++) {
-        const thisMonth = moment().year(currentYear).month(i)
-        const formattedMonth = thisMonth.format('YYYY-MM')
-        mainDates.push(formattedMonth)
+        const thisMonth = moment().year(currentYear).month(i);
+        const formattedMonth = thisMonth.format("YYYY-MM");
+        mainDates.push(formattedMonth);
       }
     }
 
@@ -536,7 +665,7 @@ export class TransactionsService {
     });
     return result;
   }
-  
+
   async getTransactionByOredrId(orderId: string): Promise<any> {
     const transaction = this.transactionModel
       .findOne({ transactionHash: orderId })
@@ -544,63 +673,69 @@ export class TransactionsService {
     return transaction;
   }
 
-  async getTokenCount(address?:string) {
+  async getTokenCount(address?: string) {
     let whereQuery: {
       status: any;
+      is_sale: boolean;
       user_wallet_address?: any;
     } = {
-      status: "paid"
+      status: "paid",
+      is_sale: true
     };
-    if(address)
-    {
+    if (address) {
       whereQuery = {
         ...whereQuery,
-        user_wallet_address:address
-      }
+        user_wallet_address: address,
+      };
     }
-    const tokenCountResult = await this.transactionModel.aggregate([
-      {
-        $match:whereQuery
-      },
-      {
-        $group: {
-          _id: '$price_currency',
-          total: {
-            $sum: { $toDouble: "$token_cryptoAmount" }
-          }
-        }
-      },
-    ]).exec();
+    const tokenCountResult = await this.transactionModel
+      .aggregate([
+        {
+          $match: whereQuery,
+        },
+        {
+          $group: {
+            _id: "$price_currency",
+            total: {
+              $sum: { $toDouble: "$token_cryptoAmount" },
+            },
+          },
+        },
+      ])
+      .exec();
     return tokenCountResult;
   }
 
-  async getUsdtCount(address?:string) {
+  async getUsdtCount(address?: string) {
     let whereQuery: {
       status: any;
+      is_sale: boolean;
       user_wallet_address?: any;
     } = {
-      status: "paid"
+      status: "paid",
+      is_sale: true
     };
-    if(address)
-    {
+    if (address) {
       whereQuery = {
         ...whereQuery,
-        user_wallet_address:address
-      }
+        user_wallet_address: address,
+      };
     }
-    const tokenCountResult = await this.transactionModel.aggregate([
-      {
-        $match:whereQuery
-      },
-      {
-        $group: {
-          _id: '$price_currency',
-          total: {
-            $sum: { $toDouble: "$price_amount" }
-          }
-        }
-      },
-    ]).exec();
+    const tokenCountResult = await this.transactionModel
+      .aggregate([
+        {
+          $match: whereQuery,
+        },
+        {
+          $group: {
+            _id: "$price_currency",
+            total: {
+              $sum: { $toDouble: "$price_amount" },
+            },
+          },
+        },
+      ])
+      .exec();
     return tokenCountResult;
   }
 }
