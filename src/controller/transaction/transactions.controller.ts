@@ -88,7 +88,7 @@ export class TransactionsController {
         });
       }
       const sales = await this.transactionService.getSales()
-      let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
+      //let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
       let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
       if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
         return response.status(HttpStatus.BAD_REQUEST).json({
@@ -97,7 +97,7 @@ export class TransactionsController {
         });
       }
     
-      const remainingMid = sales.total_token - userPurchaseMid;
+      const remainingMid = sales.total_token - sales.user_purchase_token;
       if (remainingMid <= 0) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           status: "failure",
@@ -197,8 +197,8 @@ export class TransactionsController {
       });
     }
     const sales = await this.transactionService.getSales()
-    let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
-    userPurchaseMid = req.body?.cryptoAmount.toFixed(2) + userPurchaseMid;
+    //let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
+    let userPurchaseMid = req.body?.cryptoAmount.toFixed(2) + sales.user_purchase_token;
 
     let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
     if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
@@ -301,7 +301,6 @@ export class TransactionsController {
         });
          
         if (userTrans.status == "paid" && totalUserTrans == 1 && referredWalletAddress) {
-          
           let priceAmount = Math.round(userTrans.price_amount * (10 / 100));
           let cryptoAmount = Math.round(userTrans.token_cryptoAmount * (10 / 100));
           
@@ -310,6 +309,8 @@ export class TransactionsController {
           });
           let orderDocument = {
             status: "paid",
+            sale_name: userTrans.sale_name,
+            sale_type: userTrans.sale_type,
             is_sale: sales ? true : false,
             price_currency: "USDT",
             price_amount: priceAmount,

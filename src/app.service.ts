@@ -7,8 +7,8 @@ import * as schedule from "node-schedule";
 import Web3 from "web3";
 import axios from "axios";
 import { Cron } from "@nestjs/schedule";
-
 import { ISales } from "src/interface/sales.interface";
+
 const ETHERSCAN_API_KEY = "7ATF9VTNMJCSVFCYYKA5HJBAFI5FEX8TCF";
 const BSCSCAN_API_KEY = "W11WIQSRZBP3CV14T5K94BD113HX1ASP77";
 const FANTOM_API_KEY = "AMEB7ZHTNCBV5WAVB9UC7WBIZV9Z9ZQSCN";
@@ -119,11 +119,11 @@ export class AppService {
           if (sales) {
             cryptoAmount = usdtAmount / sales.amount;
             is_sale = true;
-            userPurchaseMid = await this.transactionService.getTotalMidCount(
-              sales.name
-            );
+            // userPurchaseMid = await this.transactionService.getTotalMidCount(
+            //   sales.name
+            // );
             userPurchaseMid =
-              parseFloat(cryptoAmount.toFixed(2)) + userPurchaseMid;
+              parseFloat(cryptoAmount.toFixed(2)) + sales.user_purchase_token;
             remainingMid = sales.total_token - userPurchaseMid;
 
             if (remainingMid <= 0) {
@@ -270,6 +270,7 @@ export class AppService {
       return []; 
     }
   }
+  
   private async getBlockDateAndTransactionDetails(
     blockNumber: number,
     transactionHash: string,
@@ -401,20 +402,25 @@ export class AppService {
 
       if (Math.abs(currentTime.diff(this.scheduledTime, 'milliseconds')) <= tolerance) {
         const transactions = await this.transactionModel
-          .find({ sale_name: "pre-sale", is_sale: false })
+          .find({ sale_name: "pre-sale", is_sale: false, status :"paid" })
           .exec();
 
         await Promise.all(transactions.map(async transaction => {
           const updatedValues = { $set: { is_sale: true } };
           if (transaction.transactionHash) {
             const currentSales = await this.transactionService.getAllSales();
-            let userPurchaseMid = parseFloat(transaction.token_cryptoAmount) + currentSales[0].user_purchase_token;
+            let userPurchaseMid = parseFloat(transaction.token_cryptoAmount.toFixed(2)) + currentSales[0].user_purchase_token;
             let remainingMid = currentSales[0].total_token - userPurchaseMid;
 
             // Ensure remaining token does not go negative
             if (remainingMid <= 0) {
-              remainingMid = 0;
+              return null;
             }
+
+            if (remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
+              return null;
+            }
+
 
             // Update sales model with cumulative totals
             const updatedSaleValues = {
@@ -432,18 +438,22 @@ export class AppService {
 
       if (Math.abs(currentTime.diff(this.scheduledTimeMain, 'milliseconds')) <= tolerance) {
         const transactions = await this.transactionModel
-          .find({ sale_name: "main-sale", is_sale: false })
+          .find({ sale_name: "main-sale", is_sale: false , status :"paid"})
           .exec();
         await Promise.all(transactions.map(async transaction => {
           const updatedValues = { $set: { is_sale: true } };
           if (transaction.transactionHash) {
             const currentSales = await this.transactionService.getAllSales();
-            let userPurchaseMid = parseFloat(transaction.token_cryptoAmount) + currentSales[1].user_purchase_token;
+            let userPurchaseMid = parseFloat(transaction.token_cryptoAmount.toFixed(2)) + currentSales[1].user_purchase_token;
             let remainingMid = currentSales[1].total_token - userPurchaseMid;
 
             // Ensure remaining token does not go negative
             if (remainingMid <= 0) {
-              remainingMid = 0;
+              return null;
+            }
+
+            if (remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
+              return null;
             }
 
             // Update sales model with cumulative totals
