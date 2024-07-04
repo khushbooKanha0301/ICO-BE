@@ -140,32 +140,38 @@ export class TransactionsService {
     statusFilter?: any
   ): Promise<any> {
     let transactionsQuery = this.transactionModel.find();
+    
     if (address) {
+      const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
       transactionsQuery = transactionsQuery.where({
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       });
     }
-    // source add
+  
+    // Source filter
     if (typeFilter && typeFilter.length > 0) {
       transactionsQuery = transactionsQuery.where({
         source: { $in: typeFilter },
       });
     }
+  
+    // Status filter
     if (statusFilter && statusFilter.length > 0) {
       transactionsQuery = transactionsQuery.where({
         status: { $in: statusFilter },
       });
     }
-    
+  
+    // Pagination
     if (page && pageSize) {
-      // Calculate the number of documents to skip
       const skipCount = (page - 1) * pageSize;
       transactionsQuery = transactionsQuery.skip(skipCount).limit(pageSize);
     }
+  
     const transactions = await transactionsQuery
       .sort({ created_at: "desc" })
       .exec();
-
+  
     if (!transactions) {
       throw new NotFoundException(`Address #${address} not found`);
     }
@@ -265,8 +271,9 @@ export class TransactionsService {
   ) {
     let transactionsQuery = this.transactionModel.find();
     if (address) {
+      const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
       transactionsQuery = transactionsQuery.where({
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       });
     }
     if (typeFilter && typeFilter.length > 0) {
@@ -299,10 +306,12 @@ export class TransactionsService {
       is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address !== null) {
+      
       woToken = {
         ...woToken,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
 
@@ -313,7 +322,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$user_wallet_address" : null,
+            _id: caseInsensitiveAddress ? "$user_wallet_address" : null,
             totalToken: { $sum: 1 },
           },
         },
@@ -340,10 +349,11 @@ export class TransactionsService {
       is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address !== null) {
       woToken = {
         ...woToken,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
     const transactions = await this.transactionModel
@@ -491,10 +501,11 @@ export class TransactionsService {
       is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address !== null) {
       woToken = {
         ...woToken,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
 
@@ -505,7 +516,7 @@ export class TransactionsService {
         },
         {
           $group: {
-            _id: address ? "$wallet_address" : null,
+            _id: caseInsensitiveAddress ? "$wallet_address" : null,
             totalToken: { $sum: 1 },
           },
         },
@@ -532,10 +543,11 @@ export class TransactionsService {
       is_sale: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address !== null) {
       woToken = {
         ...woToken,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
     const transactions = await this.transactionModel
@@ -682,10 +694,11 @@ export class TransactionsService {
       status: "paid",
       is_sale: true
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address) {
       whereQuery = {
         ...whereQuery,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
     const tokenCountResult = await this.transactionModel
@@ -715,10 +728,11 @@ export class TransactionsService {
       status: "paid",
       is_sale: true
     };
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address) {
       whereQuery = {
         ...whereQuery,
-        user_wallet_address: address,
+        user_wallet_address: caseInsensitiveAddress,
       };
     }
     const tokenCountResult = await this.transactionModel

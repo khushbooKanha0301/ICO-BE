@@ -18,6 +18,7 @@ const ETH_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const FTM_USDT_ADDRESS = "0x049d68029688eAbF473097a2fC38ef61633A3C7A";
 const MATIC_USDT_ADDRESS = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
 const BNB_USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+const INFURA_KEY="b16f8eb83d5749d18959c29c249e51f1";
 
 @Injectable()
 export class AppService {
@@ -36,6 +37,10 @@ export class AppService {
       )
     );
     this.scheduleRecurringCheck();
+  }
+
+  getHello(): string {
+    return 'Hello World!';
   }
 
   private async fetchTransactionData() {
@@ -63,45 +68,43 @@ export class AppService {
     };
 
     // Calculate block numbers for the last 2 hours
-    const { startBlock, endBlock } = await this.get10MinuteBlockRange();
     try {
       const responses = await Promise.all([
-        this.fetchTransactionsForNetwork(networks["FTM"], startBlock, endBlock),
-        this.fetchTransactionsForNetwork(networks["ETH"], startBlock, endBlock),
-        this.fetchTransactionsForNetwork(networks["BNB"], startBlock, endBlock),
+        this.fetchTransactionsForNetwork(networks["FTM"]),
+        this.fetchTransactionsForNetwork(networks["ETH"]),
+        this.fetchTransactionsForNetwork(networks["BNB"]),
         this.fetchTransactionsForNetwork(
-          networks["MATIC"],
-          startBlock,
-          endBlock
-        ),
+          networks["MATIC"])
       ]);
 
       let allTransactions = [];
       for (let i = 0; i < responses.length; i++) {
         const response = responses[i];
         if (response.data && response.data.result) {
+          const userTransactions = await Promise.all(
+            response?.data?.result.map(async (tx) => {
+              const data = await this.transactionService.getTransactionByOredrId(
+                tx.transactionHash
+              );
+              if (!data) return tx;
+              return null;
+            })
+          );
+          const transactionsWithNoData = userTransactions.filter(
+            (tx) => tx !== null
+          );
+          
           const transactions = await this.parseLogs(
-            response.data.result,
+            transactionsWithNoData,
             Object.keys(networks)[i]
           );
+
           allTransactions = allTransactions.concat(transactions);
         }
       }
-      const userTransactions = await Promise.all(
-        allTransactions.map(async (tx) => {
-          const data = await this.transactionService.getTransactionByOredrId(
-            tx.transactionHash
-          );
-          if (!data) return tx;
-          return null;
-        })
-      );
-      const transactionsWithNoData = userTransactions.filter(
-        (tx) => tx !== null
-      );
-
+     
       await Promise.all(
-        transactionsWithNoData.map(async (tx) => {
+        allTransactions.map(async (tx) => {
           const usdtAmount = parseFloat(
             this.web3.utils.fromWei(tx.value, "ether")
           );
@@ -111,7 +114,7 @@ export class AppService {
           let sales = await this.transactionService.checkOutsideSales(
             formattedCurrentDate
           );
-
+          
           let cryptoAmount = 0;
           let is_sale = false;
           let userPurchaseMid;
@@ -167,7 +170,7 @@ export class AppService {
             sale_name: sales.name,
             sale_type: "outside-website"
           };
-
+          console.log("createOrder", createOrder)
           const transaction = await this.transactionService.createTransaction(
             createOrder
           );
@@ -192,22 +195,18 @@ export class AppService {
   }
 
   private async fetchTransactionsForNetwork(
-    networkData: any,
-    startBlock: number,
-    endBlock: number
+    networkData: any
   ) {
     const { usdtAddress, apiKey } = networkData;
     const baseUrl = this.getBaseUrlForNetwork(networkData);
-    const fromBlockHex = `0x${startBlock.toString(16)}`;
-    const toBlockHex = `0x${endBlock.toString(16)}`;
 
     return axios.get(baseUrl, {
       params: {
         module: "logs",
         action: "getLogs",
         address: usdtAddress,
-        fromBlock: fromBlockHex,
-        toBlock: toBlockHex,
+        fromBlock: "0",
+        toBlock: "latest",
         topic0:
           "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer event signature
         topic2: `0x${RECEIVER_ADDRESS.slice(2)
@@ -220,54 +219,59 @@ export class AppService {
 
   private async parseLogs(logs: any[], network: string) {
     try {
-      return Promise.all(
-        logs.map(async (log) => {
-          const blockNumber = log.blockNumber;
-          const blockHash = log.blockHash;
-          const gasPrice = this.web3.utils.hexToNumberString(log.gasPrice);
-          const gasUsed = this.web3.utils.hexToNumberString(log.gasUsed);
-          const transactionHash = log.transactionHash;
-          const { date, method } = await this.getBlockDateAndTransactionDetails(
-            blockNumber,
+      let parsedTransactions = [];
+  
+      for (const log of logs) {
+        const blockNumber = log.blockNumber;
+        const blockHash = log.blockHash;
+        const gasPrice = this.web3.utils.hexToNumberString(log.gasPrice);
+        const gasUsed = this.web3.utils.hexToNumberString(log.gasUsed);
+        const transactionHash = log.transactionHash;
+  
+        // Fetch date and method details
+        const { date, method } = await this.getBlockDateAndTransactionDetails(
+          blockNumber,
+          transactionHash,
+          network
+        );
+        // Check if transaction date is within the last 10 minutes
+        if (!this.isWithinLast10Minutes(date)) {
+          continue; // Skip transactions that are not within the last 10 minutes
+        }
+  
+        // Check for transfer method and valid topics
+        if (
+          method === "transfer" &&
+          log.topics &&
+          log.topics.length >= 3 &&
+          typeof log.topics[1] === "string" &&
+          typeof log.topics[2] === "string"
+        ) {
+          const from = `0x${log.topics[1].slice(26)}`;
+          const to = `0x${log.topics[2].slice(26)}`;
+          const value = this.web3.utils.hexToNumberString(log.data);
+  
+          const transaction = {
+            from,
+            to,
+            value,
+            blockHash,
+            gasPrice,
+            gasUsed,
             transactionHash,
-            network
-          );
-        
-          if (!this.isWithinLast10Minutes(date)) {
-            return null; // Skip transactions that are not within the last 2 hours
-          }
-
-          if (
-            log.topics &&
-            log.topics.length >= 3 &&
-            typeof log.topics[1] === "string" &&
-            typeof log.topics[2] === "string"
-          ) {
-            const from = `0x${log.topics[1].slice(26)}`;
-            const to = `0x${log.topics[2].slice(26)}`;
-            const value = this.web3.utils.hexToNumberString(log.data);
-            if (method === "transfer") {
-              return {
-                from,
-                to,
-                value,
-                blockHash,
-                gasPrice,
-                gasUsed,
-                transactionHash,
-                blockNumber,
-                createDate: date,
-                method,
-                network,
-              };
-            }
-          }
-          return null; // Return null for non-transfer or invalid logs
-        })
-      ).then((transactions) => transactions.filter((tx) => tx)); // Filter out undefined or null values
+            blockNumber,
+            createDate: date,
+            method,
+            network,
+          };
+          parsedTransactions.push(transaction);
+        }
+      }
+  
+      return parsedTransactions;
     } catch (error) {
       console.error("Error in parseLogs:", error);
-      return []; 
+      return [];
     }
   }
   
@@ -299,23 +303,30 @@ export class AppService {
           },
         }),
       ]);
+      const hexTimestamp = blockResponse.data.result.timestamp;
+      const timestamp = parseInt(hexTimestamp, 16);
+      
+      // Verify the timestamp is in seconds
+      if (!timestamp || isNaN(timestamp) || timestamp.toString().length > 10) {
+        throw new Error("Invalid timestamp value");
+      }
   
-      const timestamp = blockResponse.data.result.timestamp;
       const input = transactionResponse.data.result?.input;
-  
+      
       if (!input) {
         throw new Error("Transaction input is undefined");
       }
   
       const method = this.decodeMethod(input);
       const formattedDate = moment.unix(timestamp).utc().format();
+    
       return {
         date: formattedDate,
         method: method,
       };
     } catch (error) {
       console.error("Error in getBlockDateAndTransactionDetails:", error);
-      throw error; // Re-throw error for handling upstream
+      throw error;
     }
   }
   
@@ -359,34 +370,45 @@ export class AppService {
     return methods[methodSignature] || "unknown";
   }
 
-  private async get10MinuteBlockRange() {
-    const currentBlock = await this.web3.eth.getBlockNumber();
-    const secondsPerBlock = 15; // Average block time on Ethereum mainnet
-    const secondsIn10Minutes = 10 * 60;
-    const startBlock = Math.max(
-      0,
-      currentBlock - Math.floor(secondsIn10Minutes / secondsPerBlock)
-    );
-    const endBlock = currentBlock; // End at current block
-    return { startBlock, endBlock };
-  }
-
   private isWithinLast10Minutes(date: string): boolean {
     const currentTime = moment.utc();
     const transactionTime = moment.utc(date);
-    const thirtyMinutesAgo = currentTime.clone().subtract(10, "minutes");
-    return transactionTime.isBetween(thirtyMinutesAgo, currentTime);
+    const twoHoursAgo = currentTime.clone().subtract(6, "hours");
+    return transactionTime.isBetween(twoHoursAgo, currentTime);
   }
 
   //Cron run every 5 minute to get outside website transactions 
-  @Cron("*/5 * * * *")
+  @Cron("*/30 * * * * *")
   async handleCron() {
     try {
+      console.log("cron is running")
       await this.fetchTransactionData();
     } catch (error) {
       console.error(error);
     }
   }
+
+  private async monitorPendingTransactions() {
+    const web3 = new Web3(new Web3.providers.WebsocketProvider(`wss://mainnet.infura.io/ws/v3/${INFURA_KEY}`));
+  
+    web3.eth.subscribe('pendingTransactions', (error, txHash) => {
+ console.log("txHash ", txHash);
+      if (error) {
+        console.error('Error subscribing to pending transactions:', error);
+        return;
+      }
+    })
+    .on('data', async (txHash) => {
+      try {
+        const tx = await web3.eth.getTransaction(txHash);
+        if (tx && tx.to && tx.to.toLowerCase() === BNB_USDT_ADDRESS.toLowerCase() && tx.input.includes(RECEIVER_ADDRESS.slice(2).toLowerCase())) {
+          console.log('Pending Transaction:', tx);
+        }
+      } catch (error) {
+        console.error('Error fetching transaction details:', error);
+      }
+    });
+  };
 
   async scheduleTargetTimeCron() {
     try {

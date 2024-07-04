@@ -385,6 +385,12 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Get("/getAllSales")
   async getAllSales(@Req() req: any, @Res() response) {
     const sales = await this.transactionService.getAllSales()
@@ -401,6 +407,12 @@ export class TransactionsController {
     }
   }
 
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
   @Get("/getPurchasedToken")
   async getPurchasedToken(@Req() req: any, @Res() response) {
     const sales = await this.transactionService.getSales()

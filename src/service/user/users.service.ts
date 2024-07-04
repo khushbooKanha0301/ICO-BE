@@ -158,8 +158,9 @@ export class UserService {
     return existingUser;
   }
   async getFindbyAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .exec();
     return existingUser;
   }
@@ -176,8 +177,9 @@ export class UserService {
     return existingUser;
   }
   async getUserDetailByAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .exec();
     if (!existingUser) {
       throw new NotFoundException(`Address #${address} not found`);
@@ -185,8 +187,9 @@ export class UserService {
     return existingUser;
   }
   async getOnlyUserBioByAddress(address: string): Promise<any> {
+    const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
-      .findOne({ wallet_address: address })
+      .findOne({ wallet_address: caseInsensitiveAddress })
       .select("-_id -nonce -__v")
       .exec();
     if (!existingUser) {
