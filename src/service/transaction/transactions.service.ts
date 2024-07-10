@@ -31,6 +31,14 @@ export class TransactionsService {
     .exec();
   }
 
+  async getSalesByName(sale_name: string) {
+    return await this.salesModel
+      .findOne({
+        name : sale_name
+      })
+    .exec();
+  }
+
   async checkOutsideSales(currentDate) {
     return await this.salesModel
       .findOne({
@@ -82,7 +90,7 @@ export class TransactionsService {
 
   async checkOutsideNearSales(momentDate) {
     const formattedDate = moment.utc(momentDate);
-    const currentDateFormatted = formattedDate.format("YYYY-MM-DDTHH:mm:ss[Z]");
+    //const currentDateFormatted = formattedDate.format("YYYY-MM-DDTHH:mm:ss[Z]");
 
     const allSales = await this.salesModel.find().exec();
 
@@ -185,6 +193,7 @@ export class TransactionsService {
           $match: {
             status: "paid",
             is_sale: true,
+            is_process: true,
             sale_name: name,
           },
         },
@@ -299,11 +308,13 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean;
+      is_process: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
@@ -342,11 +353,13 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean;
+      is_process: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
@@ -494,11 +507,13 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean;
+      is_process: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
@@ -536,11 +551,13 @@ export class TransactionsService {
     let woToken: {
       status: string;
       is_sale: boolean;
+      is_process: boolean;
       created_at: { $gt: any; $lt: any };
       user_wallet_address?: any;
     } = {
       status: "paid",
       is_sale: true,
+      is_process: true,
       created_at: { $gt: from_date, $lt: to_date },
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
@@ -685,14 +702,30 @@ export class TransactionsService {
     return transaction;
   }
 
+  async getPaidTransactionByOrderId(orderId: string, status: string): Promise<any> {
+    try {
+      const transaction = await this.transactionModel.findOne({
+        transactionHash: orderId,
+        status: status,
+      }).exec();
+      
+      return transaction;
+    } catch (error) {
+      console.error(`Error finding transaction with orderId: ${orderId} and status: ${status}`, error);
+      throw error;
+    }
+  }
+
   async getTokenCount(address?: string) {
     let whereQuery: {
       status: any;
       is_sale: boolean;
+      is_process: boolean;
       user_wallet_address?: any;
     } = {
       status: "paid",
-      is_sale: true
+      is_sale: true,
+      is_process: true,
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address) {
@@ -723,10 +756,12 @@ export class TransactionsService {
     let whereQuery: {
       status: any;
       is_sale: boolean;
+      is_process: boolean;
       user_wallet_address?: any;
     } = {
       status: "paid",
-      is_sale: true
+      is_sale: true,
+      is_process: true
     };
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     if (address) {

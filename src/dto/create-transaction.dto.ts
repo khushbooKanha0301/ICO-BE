@@ -30,6 +30,10 @@ export class CreateTransactionDto {
 
 	@IsOptional()
 	@IsString()
+	is_process: boolean;
+
+	@IsOptional()
+	@IsString()
 	price_amount: string;
 
 	@IsOptional()

@@ -8,6 +8,7 @@ import Web3 from "web3";
 import axios from "axios";
 import { Cron } from "@nestjs/schedule";
 import { ISales } from "src/interface/sales.interface";
+import { IUser } from "src/interface/users.interface";
 
 const ETHERSCAN_API_KEY = "7ATF9VTNMJCSVFCYYKA5HJBAFI5FEX8TCF";
 const BSCSCAN_API_KEY = "W11WIQSRZBP3CV14T5K94BD113HX1ASP77";
@@ -18,7 +19,6 @@ const ETH_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const FTM_USDT_ADDRESS = "0x049d68029688eAbF473097a2fC38ef61633A3C7A";
 const MATIC_USDT_ADDRESS = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
 const BNB_USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
-const INFURA_KEY="b16f8eb83d5749d18959c29c249e51f1";
 
 @Injectable()
 export class AppService {
@@ -27,6 +27,7 @@ export class AppService {
   private scheduledTimeMain: moment.Moment;
   
   constructor(
+    @InjectModel("user") private userModel: Model<IUser>,
     @InjectModel("transaction") private transactionModel: Model<any>,
     @InjectModel("sales") private salesModel: Model<ISales>,
     private readonly transactionService: TransactionsService,
@@ -69,6 +70,122 @@ export class AppService {
 
     // Calculate block numbers for the last 2 hours
     try {
+      const responsesPending = await Promise.all([
+        this.fetchPendingTransactionsForNetwork(networks["FTM"]),
+        this.fetchPendingTransactionsForNetwork(networks["ETH"]),
+        this.fetchPendingTransactionsForNetwork(networks["BNB"]),
+        this.fetchPendingTransactionsForNetwork(networks["MATIC"])
+      ]);
+
+      let allTransactionsPending = [];
+      for (let i = 0; i < responsesPending.length; i++) {
+        const transactions = await this.parsePendingLogs(
+          responsesPending[i],
+          Object.keys(networks)[i]
+        );
+        allTransactionsPending = allTransactionsPending.concat(transactions);
+      }
+
+      const userPendingTransactions = await Promise.all(
+        allTransactionsPending.map(async (tx) => {
+          const data = await this.transactionService.getTransactionByOredrId(
+            tx.transactionHash
+          );
+          if (!data) return tx;
+          return null;
+        })
+      );
+
+      const pentransactionsWithNoData = userPendingTransactions.filter(
+        (tx) => tx !== null
+      );
+      await Promise.all(
+        pentransactionsWithNoData.map(async (tx) => {
+          const usdtAmount = parseFloat(
+            this.web3.utils.fromWei(tx.value, "ether")
+          );
+          const formattedCurrentDate = moment(tx.createDate).format(
+            "YYYY-MM-DD[T]HH:mm:ss[Z]"
+          );
+          let sales = await this.transactionService.checkOutsideSales(
+            formattedCurrentDate
+          );
+          console.log("sales", sales) 
+          let cryptoAmount = 0;
+          let is_sale = false;
+          if (sales) {
+            cryptoAmount = usdtAmount / sales.amount;
+            is_sale = true;
+          } else {
+            sales = await this.transactionService.checkOutsideNearSales(
+              formattedCurrentDate
+            );
+            if (sales) {
+              cryptoAmount = usdtAmount / sales.amount;
+              is_sale = false;
+            } else {
+              is_sale = false;
+              cryptoAmount = 0;
+            }
+          }
+          const createOrder = {
+            transactionHash: tx.transactionHash,
+            price_amount:usdtAmount,
+            status: "pending",
+            user_wallet_address: tx.from,
+            receiver_wallet_address: tx.to,
+            blockHash: tx.blockHash,
+            effectiveGasPrice: tx.gasPrice,
+            gasUsed: tx.gasUsed,
+            price_currency: "USDT",
+            created_at: moment.utc().format(),
+            paid_at: tx.createDate,
+            blockNumber: tx.blockNumber,
+            source: "purchase",
+            network: tx.network,
+            amount: usdtAmount,
+            token_cryptoAmount: cryptoAmount.toFixed(2),
+            is_sale: is_sale,
+            is_process: false,
+            sale_name: sales.name,
+            sale_type: "outside-website"
+          };
+          await this.transactionService.createTransaction(
+            createOrder
+          );
+        })
+      );
+    } catch (error) {
+      console.error("Error fetching transaction data:", error);
+    }
+  }
+
+  private async fetchTransactionPaidData() {
+    const networks = {
+      FTM: {
+        usdtAddress: FTM_USDT_ADDRESS,
+        apiKey: FANTOM_API_KEY,
+        network: "FTM",
+      },
+      ETH: {
+        usdtAddress: ETH_CONTRACT_ADDRESS,
+        apiKey: ETHERSCAN_API_KEY,
+        network: "ETH",
+      },
+      BNB: {
+        usdtAddress: BNB_USDT_ADDRESS,
+        apiKey: BSCSCAN_API_KEY,
+        network: "BNB",
+      },
+      MATIC: {
+        usdtAddress: MATIC_USDT_ADDRESS,
+        apiKey: POLYGON_API_KEY,
+        network: "MATIC",
+      },
+    };
+
+    // Calculate block numbers for the last 2 hours
+    try {
       const responses = await Promise.all([
         this.fetchTransactionsForNetwork(networks["FTM"]),
         this.fetchTransactionsForNetwork(networks["ETH"]),
@@ -79,32 +196,66 @@ export class AppService {
 
       let allTransactions = [];
       for (let i = 0; i < responses.length; i++) {
-        const response = responses[i];
-        if (response.data && response.data.result) {
-          const userTransactions = await Promise.all(
-            response?.data?.result.map(async (tx) => {
-              const data = await this.transactionService.getTransactionByOredrId(
-                tx.transactionHash
-              );
-              if (!data) return tx;
-              return null;
-            })
-          );
-          const transactionsWithNoData = userTransactions.filter(
-            (tx) => tx !== null
-          );
-          
-          const transactions = await this.parseLogs(
-            transactionsWithNoData,
-            Object.keys(networks)[i]
-          );
+        const transactions = await this.parseLogs(
+          responses[i],
+          Object.keys(networks)[i]
+        );
+        allTransactions = allTransactions.concat(transactions);
+      }
 
-          allTransactions = allTransactions.concat(transactions);
+      const userTransactions = [];
+
+      for (const tx of allTransactions) {
+        try {
+          const data = await this.transactionService.getTransactionByOredrId(tx.transactionHash);
+          if (!data) {
+            userTransactions.push(tx);
+            continue;
+          }
+      
+          if (data.status === "pending") {
+            const updateData = { status: "paid" };
+            await this.transactionService.updateTransactionData(data.transactionHash, updateData);
+            const existingUser = await this.userModel
+            .findOne({wallet_address: data.user_wallet_address})
+            .select("id wallet_address is_verified kyc_completed")
+            
+            if (existingUser && existingUser.kyc_completed === false) {
+              return null;
+            }
+            if (
+              existingUser && existingUser?.is_verified === 1 &&
+              existingUser?.kyc_completed === true 
+            ) {
+              
+              if (data && data.is_sale) {
+                const latestSales = await this.transactionService.getSalesByName(data.sale_name);
+                const userPurchaseMid = Number(latestSales?.user_purchase_token) + parseFloat(data.token_cryptoAmount)
+                const remainingMid= Number(latestSales?.remaining_token) - parseFloat(data.token_cryptoAmount);
+                
+                if (remainingMid <= 0 || remainingMid - parseFloat(data.token_cryptoAmount) < 0) {
+                  return null;
+                }
+                const updatedSaleValues = {
+                  user_purchase_token: parseFloat(userPurchaseMid.toFixed(2)),
+                  remaining_token: parseFloat(remainingMid.toFixed(2))
+                } 
+                await this.salesModel.updateOne({ _id: latestSales?._id }, { $set: updatedSaleValues });
+                await this.transactionService.updateTransactionData(data.transactionHash, {is_process: true});
+              }
+            }
+          } else if (data.status === "paid") {
+            continue;
+          }
+          userTransactions.push(null);
+        } catch (error) {
+          userTransactions.push(null);
         }
       }
+      const transactionsWithNoData = userTransactions.filter((tx) => tx !== null);
      
       await Promise.all(
-        allTransactions.map(async (tx) => {
+        transactionsWithNoData.map(async (tx) => {
           const usdtAmount = parseFloat(
             this.web3.utils.fromWei(tx.value, "ether")
           );
@@ -122,18 +273,10 @@ export class AppService {
           if (sales) {
             cryptoAmount = usdtAmount / sales.amount;
             is_sale = true;
-            // userPurchaseMid = await this.transactionService.getTotalMidCount(
-            //   sales.name
-            // );
-            userPurchaseMid =
-              parseFloat(cryptoAmount.toFixed(2)) + sales.user_purchase_token;
-            remainingMid = sales.total_token - userPurchaseMid;
+            userPurchaseMid = parseFloat(cryptoAmount.toFixed(2)) + sales.user_purchase_token;
+            remainingMid = sales.remaining_token - parseFloat(cryptoAmount.toFixed(2));
 
-            if (remainingMid <= 0) {
-              return null;
-            }
-
-            if (remainingMid - parseFloat(cryptoAmount.toFixed(2)) < 0) {
+            if (remainingMid <= 0 || remainingMid - parseFloat(cryptoAmount.toFixed(2)) < 0) {
               return null;
             }
           } else {
@@ -148,7 +291,7 @@ export class AppService {
               cryptoAmount = 0;
             }
           }
-
+          console.log("sales paid", sales) 
           const createOrder = {
             transactionHash: tx.transactionHash,
             price_amount:usdtAmount,
@@ -167,26 +310,43 @@ export class AppService {
             amount: this.web3.utils.fromWei(tx.value, "ether"),
             token_cryptoAmount: cryptoAmount.toFixed(2),
             is_sale: is_sale,
-            sale_name: sales.name,
+            is_process: false,
+            sale_name: sales && sales.name ? sales.name : null,
             sale_type: "outside-website"
           };
-          console.log("createOrder", createOrder)
+          console.log("createOrder paid-----", createOrder);
           const transaction = await this.transactionService.createTransaction(
             createOrder
           );
+          if(transaction)
+          {
+            const existingUser = await this.userModel
+            .findOne({wallet_address: transaction.user_wallet_address})
+            .select("id wallet_address is_verified kyc_completed")
 
-          if (transaction.is_sale) {
-            const updatedSalevalues = {
-              $set: {
-                user_purchase_token: Number(userPurchaseMid.toFixed(2)),
-                remaining_token: Number(remainingMid.toFixed(2)),
-              },
-            };
-            await this.salesModel.updateOne(
-              { _id: sales?._id },
-              updatedSalevalues
-            );
+            if (existingUser && existingUser.kyc_completed === false) {
+              return null; // Skip this transaction
+            }
+            if (
+              existingUser && existingUser?.is_verified === 1 &&
+              existingUser?.kyc_completed === true 
+            ) {
+              if (transaction.is_sale) {
+                const updatedSalevalues = {
+                  $set: {
+                    user_purchase_token: parseFloat(userPurchaseMid.toFixed(2)),
+                    remaining_token: parseFloat(remainingMid.toFixed(2)),
+                  },
+                };
+                await this.salesModel.updateOne(
+                  { _id: sales?._id },
+                  updatedSalevalues
+                );
+                await this.transactionService.updateTransactionData(tx.transactionHash, {is_process: true});
+              }
+            }
           }
+          return 
         })
       );
     } catch (error) {
@@ -199,22 +359,27 @@ export class AppService {
   ) {
     const { usdtAddress, apiKey } = networkData;
     const baseUrl = this.getBaseUrlForNetwork(networkData);
-
-    return axios.get(baseUrl, {
-      params: {
-        module: "logs",
-        action: "getLogs",
-        address: usdtAddress,
-        fromBlock: "0",
-        toBlock: "latest",
-        topic0:
-          "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer event signature
-        topic2: `0x${RECEIVER_ADDRESS.slice(2)
-          .toLowerCase()
-          .padStart(64, "0")}`,
-        apikey: apiKey,
-      },
-    });
+    try {
+      const response = await axios.get(baseUrl, {
+        params: {
+          module: "logs",
+          action: "getLogs",
+          address: usdtAddress,
+          fromBlock: "0",
+          toBlock: "latest",
+          topic0:
+            "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer event signature
+          topic2: `0x${RECEIVER_ADDRESS.slice(2)
+            .toLowerCase()
+            .padStart(64, "0")}`,
+          apikey: apiKey,
+        }
+      });
+      return response.data.result;
+    } catch (error) {
+      console.error("Error fetching pending transactions:", error);
+      return [];
+    }
   }
 
   private async parseLogs(logs: any[], network: string) {
@@ -222,59 +387,60 @@ export class AppService {
       let parsedTransactions = [];
   
       for (const log of logs) {
-        const blockNumber = log.blockNumber;
-        const blockHash = log.blockHash;
-        const gasPrice = this.web3.utils.hexToNumberString(log.gasPrice);
-        const gasUsed = this.web3.utils.hexToNumberString(log.gasUsed);
-        const transactionHash = log.transactionHash;
-  
-        // Fetch date and method details
-        const { date, method } = await this.getBlockDateAndTransactionDetails(
-          blockNumber,
-          transactionHash,
-          network
-        );
-        // Check if transaction date is within the last 10 minutes
-        if (!this.isWithinLast10Minutes(date)) {
-          continue; // Skip transactions that are not within the last 10 minutes
-        }
-  
-        // Check for transfer method and valid topics
-        if (
-          method === "transfer" &&
-          log.topics &&
-          log.topics.length >= 3 &&
-          typeof log.topics[1] === "string" &&
-          typeof log.topics[2] === "string"
-        ) {
-          const from = `0x${log.topics[1].slice(26)}`;
+        try {
           const to = `0x${log.topics[2].slice(26)}`;
-          const value = this.web3.utils.hexToNumberString(log.data);
+          if (log && to && to.toLowerCase() === RECEIVER_ADDRESS.toLowerCase()){
+          const gasPrice = log.gasPrice ? this.web3.utils.hexToNumberString(log.gasPrice) : '0';
+          const gasUsed = log.gasUsed ? this.web3.utils.hexToNumberString(log.gasUsed) : '0';
+          
+          // Fetch date and method details
+          const { date, method } = await this.getBlockDateAndTransactionDetails(
+            log.blockNumber,
+            log.transactionHash,
+            network
+          );
+          // Check if transaction date is within the last 10 minutes
+          if (!this.isWithinLast10Minutes(date)) {
+            continue;
+          }
   
-          const transaction = {
-            from,
-            to,
-            value,
-            blockHash,
-            gasPrice,
-            gasUsed,
-            transactionHash,
-            blockNumber,
-            createDate: date,
-            method,
-            network,
-          };
-          parsedTransactions.push(transaction);
+          // Check for transfer method and valid topics
+          if (
+            method === "transfer" &&
+            log.topics &&
+            log.topics.length >= 3 &&
+            typeof log.topics[1] === "string" &&
+            typeof log.topics[2] === "string"
+          ) {
+            const from = `0x${log.topics[1].slice(26)}`;
+            const value = this.web3.utils.hexToNumberString(log.data);
+            const transaction = {
+              from,
+              to,
+              value,
+              blockHash: log.blockHash,
+              gasPrice,
+              gasUsed,
+              transactionHash: log.transactionHash,
+              blockNumber: log.blockNumber,
+              createDate: date,
+              method,
+              network,
+            };
+            parsedTransactions.push(transaction);
+          }
+          }
+        } catch (error) {
+          console.error(`Error parsing log for transaction ${log.transactionHash}:`, error);
         }
       }
-  
       return parsedTransactions;
     } catch (error) {
       console.error("Error in parseLogs:", error);
       return [];
     }
   }
-  
+
   private async getBlockDateAndTransactionDetails(
     blockNumber: number,
     transactionHash: string,
@@ -310,7 +476,6 @@ export class AppService {
       if (!timestamp || isNaN(timestamp) || timestamp.toString().length > 10) {
         throw new Error("Invalid timestamp value");
       }
-  
       const input = transactionResponse.data.result?.input;
       
       if (!input) {
@@ -319,7 +484,6 @@ export class AppService {
   
       const method = this.decodeMethod(input);
       const formattedDate = moment.unix(timestamp).utc().format();
-    
       return {
         date: formattedDate,
         method: method,
@@ -327,6 +491,63 @@ export class AppService {
     } catch (error) {
       console.error("Error in getBlockDateAndTransactionDetails:", error);
       throw error;
+    }
+  }
+  
+  private async fetchPendingTransactionsForNetwork(networkData: any) {
+    const { usdtAddress, apiKey } = networkData;
+    const baseUrl = this.getBaseUrlForNetwork(networkData);
+    try {
+      const response = await axios.get(baseUrl, {
+        params: {
+          module: 'account',
+          action: 'tokentx',
+          contractaddress: usdtAddress,
+          sort: 'pending',
+          apikey: apiKey,
+          address: RECEIVER_ADDRESS,
+        }
+      });
+      return response.data.result;
+    } catch (error) {
+      console.error("Error fetching pending transactions:", error);
+      return [];
+    }
+  }
+
+  private async parsePendingLogs(logs: any[], network: string) {
+    try {
+      let parsedTransactions = [];
+      for (const log of logs) {
+        try {
+          const formattedDate = moment.unix(log.timeStamp).utc().format();
+
+          if (log && log.to && log.to.toLowerCase() === RECEIVER_ADDRESS.toLowerCase()){
+            if (!this.isWithinLast10Minutes(formattedDate)) {
+              continue;
+            }    
+            const transaction = {
+              from: log.from,
+              to: log.to,
+              value: log.value,
+              blockHash: log.blockHash,
+              gasPrice: log.gasPrice,
+              gasUsed: log.gasUsed,
+              transactionHash: log.hash,
+              blockNumber: log.blockNumber,
+              createDate: formattedDate,
+              network,
+            };
+            parsedTransactions.push(transaction);
+          }
+        } catch (error) {
+          console.error(`Error parsing log for transaction ${log.hash}:`, error);
+        }
+      }
+      return parsedTransactions;
+    } catch (error) {
+      console.error("Error in parseLogs:", error);
+      return [];
     }
   }
   
@@ -373,42 +594,32 @@ export class AppService {
   private isWithinLast10Minutes(date: string): boolean {
     const currentTime = moment.utc();
     const transactionTime = moment.utc(date);
-    const twoHoursAgo = currentTime.clone().subtract(6, "hours");
+    const twoHoursAgo = currentTime.clone().subtract(8, "days");
     return transactionTime.isBetween(twoHoursAgo, currentTime);
   }
 
-  //Cron run every 5 minute to get outside website transactions 
+  //Cron run every 30 sec to get outside website transactions 
   @Cron("*/30 * * * * *")
   async handleCron() {
     try {
-      console.log("cron is running")
+      const currentTime = moment.utc().format();
+      console.log(`cron is running ${currentTime}`)
       await this.fetchTransactionData();
     } catch (error) {
       console.error(error);
     }
   }
 
-  private async monitorPendingTransactions() {
-    const web3 = new Web3(new Web3.providers.WebsocketProvider(`wss://mainnet.infura.io/ws/v3/${INFURA_KEY}`));
-  
-    web3.eth.subscribe('pendingTransactions', (error, txHash) => {
- console.log("txHash ", txHash);
-      if (error) {
-        console.error('Error subscribing to pending transactions:', error);
-        return;
-      }
-    })
-    .on('data', async (txHash) => {
-      try {
-        const tx = await web3.eth.getTransaction(txHash);
-        if (tx && tx.to && tx.to.toLowerCase() === BNB_USDT_ADDRESS.toLowerCase() && tx.input.includes(RECEIVER_ADDRESS.slice(2).toLowerCase())) {
-          console.log('Pending Transaction:', tx);
-        }
-      } catch (error) {
-        console.error('Error fetching transaction details:', error);
-      }
-    });
-  };
+  @Cron("*/1 * * * *")
+  async handleCrons() {
+    try {
+      const currentTime = moment.utc().format();
+      console.log(`cron is running ${currentTime}`)
+      await this.fetchTransactionPaidData();
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   async scheduleTargetTimeCron() {
     try {
@@ -428,32 +639,36 @@ export class AppService {
           .exec();
 
         await Promise.all(transactions.map(async transaction => {
-          const updatedValues = { $set: { is_sale: true } };
+          
           if (transaction.transactionHash) {
             const currentSales = await this.transactionService.getAllSales();
             let userPurchaseMid = parseFloat(transaction.token_cryptoAmount.toFixed(2)) + currentSales[0].user_purchase_token;
             let remainingMid = currentSales[0].total_token - userPurchaseMid;
-
-            // Ensure remaining token does not go negative
-            if (remainingMid <= 0) {
+            if (remainingMid <= 0 || remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
               return null;
             }
+            
+            const existingUser = await this.userModel
+            .findOne({wallet_address: transaction.user_wallet_address})
+            .select("id wallet_address is_verified kyc_completed")
 
-            if (remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
-              return null;
+            if (existingUser && existingUser.kyc_completed === false) {
+              return null; // Skip this transaction
             }
-
-
-            // Update sales model with cumulative totals
-            const updatedSaleValues = {
-              $set: {
-                user_purchase_token: Number(userPurchaseMid.toFixed(2)),
-                remaining_token: Number(remainingMid.toFixed(2)),
-              },
-            };
-
-            await this.salesModel.updateOne({ _id: currentSales[0]._id }, updatedSaleValues);
-            await this.transactionModel.updateOne({ transactionHash: transaction.transactionHash }, updatedValues);
+            if (
+              existingUser && existingUser?.is_verified === 1 &&
+              existingUser?.kyc_completed === true 
+            ){
+              const updatedSaleValues = {
+                $set: {
+                  user_purchase_token: parseFloat(userPurchaseMid.toFixed(2)),
+                  remaining_token: parseFloat(remainingMid.toFixed(2)),
+                },
+              };
+              const updatedValues = { $set: { is_sale: true , is_process: true} };
+              await this.salesModel.updateOne({ _id: currentSales[0]._id }, updatedSaleValues);
+              await this.transactionService.updateTransactionData(transaction.transactionHash, updatedValues);
+            }
           }
         }));
       }
@@ -462,32 +677,39 @@ export class AppService {
         const transactions = await this.transactionModel
           .find({ sale_name: "main-sale", is_sale: false , status :"paid"})
           .exec();
+        
         await Promise.all(transactions.map(async transaction => {
-          const updatedValues = { $set: { is_sale: true } };
           if (transaction.transactionHash) {
             const currentSales = await this.transactionService.getAllSales();
             let userPurchaseMid = parseFloat(transaction.token_cryptoAmount.toFixed(2)) + currentSales[1].user_purchase_token;
             let remainingMid = currentSales[1].total_token - userPurchaseMid;
 
-            // Ensure remaining token does not go negative
-            if (remainingMid <= 0) {
+            if (remainingMid <= 0 || remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
               return null;
             }
+            
+            const existingUser = await this.userModel
+            .findOne({wallet_address: transaction.user_wallet_address})
+            .select("id wallet_address is_verified kyc_completed")
 
-            if (remainingMid - parseFloat(transaction.token_cryptoAmount.toFixed(2)) < 0) {
+            if (existingUser && existingUser.kyc_completed === false) {
               return null;
             }
-
-            // Update sales model with cumulative totals
-            const updatedSaleValues = {
-              $set: {
-                user_purchase_token: Number(userPurchaseMid.toFixed(2)),
-                remaining_token: Number(remainingMid.toFixed(2)),
-              },
-            };
-
-            await this.salesModel.updateOne({ _id: currentSales[1]._id }, updatedSaleValues);
-            await this.transactionModel.updateOne({ transactionHash: transaction.transactionHash }, updatedValues);
+            if (
+              existingUser && existingUser?.is_verified === 1 &&
+              existingUser?.kyc_completed === true 
+            ){
+              const updatedSaleValues = {
+                $set: {
+                  user_purchase_token: parseFloat(userPurchaseMid.toFixed(2)),
+                  remaining_token: parseFloat(remainingMid.toFixed(2)),
+                },
+              };
+              const updatedValues = { $set: { is_sale: true , is_process: true} };
+              await this.salesModel.updateOne({ _id: currentSales[1]._id }, updatedSaleValues);
+              await this.transactionService.updateTransactionData(transaction.transactionHash, updatedValues)
+            }
+           return
           }
         }));
       }

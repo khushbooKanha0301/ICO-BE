@@ -88,7 +88,6 @@ export class TransactionsController {
         });
       }
       const sales = await this.transactionService.getSales()
-      //let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
       let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
       if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
         return response.status(HttpStatus.BAD_REQUEST).json({
@@ -197,8 +196,7 @@ export class TransactionsController {
       });
     }
     const sales = await this.transactionService.getSales()
-    //let userPurchaseMid = await this.transactionService.getTotalMidCount(sales.name);
-    let userPurchaseMid = req.body?.cryptoAmount.toFixed(2) + sales.user_purchase_token;
+    let userPurchaseMid = parseFloat(req.body?.cryptoAmount.toFixed(2)) + sales.user_purchase_token;
 
     let cryptoAmount = req.body?.amount / (sales && sales.amount ? sales.amount : 0);
     if(cryptoAmount.toFixed(2)  !== req.body?.cryptoAmount){
@@ -210,7 +208,6 @@ export class TransactionsController {
   
     const remainingMid = sales.total_token - userPurchaseMid;
     const updatedSalevalues = { $set: { remaining_token: remainingMid } };
-    await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
     
     if (remainingMid <= 0) {
       return response.status(HttpStatus.BAD_REQUEST).json({
@@ -240,6 +237,7 @@ export class TransactionsController {
       network : req.body?.network,
       price_currency: "USDT",
       is_sale: true,
+      is_process: false,
       price_amount: req.body?.amount,
       token_cryptoAmount :cryptoAmount,
       gasUsed :req.body?.gasUsed,
@@ -256,6 +254,8 @@ export class TransactionsController {
     const transaction = await this.transactionService.createTransaction(
       transactionData
     );
+    await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+    await this.transactionService.updateTransactionData(transaction.transactionHash, {is_process: true});
     if (transaction) {
       return response.status(HttpStatus.OK).json({
         message: "Order Created Successfully",
@@ -282,7 +282,8 @@ export class TransactionsController {
     try{
       const transData = {
         status: req.body.status,
-        paid_at : moment.utc().format()
+        paid_at : moment.utc().format(),
+        is_process: true
       }
       await this.transactionService.updateTransactionData(req.body.transactionHash , transData);
       const userTrans = await this.transactionService.getTransactionByOredrId(req.body.transactionHash);
@@ -312,6 +313,7 @@ export class TransactionsController {
             sale_name: userTrans.sale_name,
             sale_type: userTrans.sale_type,
             is_sale: sales ? true : false,
+            is_process: true,
             price_currency: "USDT",
             price_amount: priceAmount,
             network: userTrans.network,
@@ -325,11 +327,12 @@ export class TransactionsController {
           );
 
           if(trans) {
-            const updatedSalevalues = { $set: { user_purchase_token: (Number(sales?.user_purchase_token) + Number(cryptoAmount.toFixed(2))) ,
-              remaining_token : (Number(sales?.remaining_token) - Number(cryptoAmount.toFixed(2)))
+            const updatedSalevalues = { $set: { user_purchase_token: (Number(sales?.user_purchase_token) + parseFloat(cryptoAmount.toFixed(2))) ,
+              remaining_token : (Number(sales?.remaining_token) - parseFloat(cryptoAmount.toFixed(2)))
               }};
 
             const salesUpdate = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+            await this.transactionService.updateTransactionData(userTrans.transactionHash, {is_process: true});
             if (salesUpdate) {
               return response.status(HttpStatus.OK).json({
                 message: "success",
@@ -340,6 +343,7 @@ export class TransactionsController {
           const userPurchased = (Number(sales?.user_purchase_token) +  Number(userTrans.token_cryptoAmount)) ;
           const updatedSalevalues = { $set: { user_purchase_token: userPurchased.toFixed(2) } };
           const trans = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+          await this.transactionService.updateTransactionData(userTrans.transactionHash, {is_process: true});
           if (trans) {
             return response.status(HttpStatus.OK).json({
               message: "success",
@@ -347,9 +351,10 @@ export class TransactionsController {
           }
         }
       } else {
-        const userPurchased = (Number(sales?.remaining_token) + Number(userTrans.token_cryptoAmount));
+        const userPurchased = (Number(sales?.remaining_token) + parseFloat(userTrans.token_cryptoAmount));
           const updatedSalevalues = { $set: { remaining_token: userPurchased } };
           const trans = await this.salesModel.updateOne({_id : sales?._id}, updatedSalevalues);
+          await this.transactionService.updateTransactionData(userTrans.transactionHash, {is_process: true});
           if (trans) {
             return response.status(HttpStatus.OK).json({
               message: "failed",

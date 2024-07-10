@@ -7,6 +7,7 @@ export interface ITransaction extends Document{
     readonly network: string;
     readonly price_currency: string;
     readonly is_sale: boolean;
+    readonly is_process: boolean;
     readonly price_amount: string;
     readonly token_cryptoAmount : string;
     readonly gasUsed : string;
