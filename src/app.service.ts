@@ -10,6 +10,10 @@ import { Cron } from "@nestjs/schedule";
 import { ISales } from "src/interface/sales.interface";
 import { IUser } from "src/interface/users.interface";
 
+import { database, firebaseMessages } from "./config/firebaseConfig";
+import { get, onValue, ref, set, update } from "firebase/database";
+
+
 const ETHERSCAN_API_KEY = "7ATF9VTNMJCSVFCYYKA5HJBAFI5FEX8TCF";
 const BSCSCAN_API_KEY = "W11WIQSRZBP3CV14T5K94BD113HX1ASP77";
 const FANTOM_API_KEY = "AMEB7ZHTNCBV5WAVB9UC7WBIZV9Z9ZQSCN";
@@ -110,7 +114,7 @@ export class AppService {
           let sales = await this.transactionService.checkOutsideSales(
             formattedCurrentDate
           );
-          console.log("sales", sales) 
+
           let cryptoAmount = 0;
           let is_sale = false;
           if (sales) {
@@ -152,7 +156,26 @@ export class AppService {
           };
           await this.transactionService.createTransaction(
             createOrder
-          );
+          )
+          const userRef = ref(
+            database,
+            firebaseMessages.ICO_TRANSACTIONS + "/" + tx.transactionHash
+          )
+          get(userRef)
+          .then(async (snapshot) => {
+            set(userRef, {
+              lastActive: Date.now(),
+              is_open: false,
+              is_sale: is_sale,
+              is_process: false,
+              user_wallet_address: tx.from,
+              status: "pending",
+              is_pending: false
+            });
+          })
+          .catch((error) => {
+            console.error("Error adding/updating user in Firebase:", error);
+          });
         })
       );
     } catch (error) {
@@ -216,6 +239,25 @@ export class AppService {
           if (data.status === "pending") {
             const updateData = { status: "paid" };
             await this.transactionService.updateTransactionData(data.transactionHash, updateData);
+            const userRef = ref(
+              database,
+              firebaseMessages.ICO_TRANSACTIONS + "/" + data.transactionHash
+            )
+            get(userRef)
+            .then(async (snapshot) => {
+              if (snapshot.exists()) {
+                update(userRef, {
+                  lastActive: Date.now(),
+                  is_pending: true,
+                  status: "paid"
+                });
+              }
+            })
+            .catch((error) => {
+              console.error("Error adding/updating user in Firebase:", error);
+            });
+
+
             const existingUser = await this.userModel
             .findOne({wallet_address: data.user_wallet_address})
             .select("id wallet_address is_verified kyc_completed")
@@ -242,6 +284,16 @@ export class AppService {
                 } 
                 await this.salesModel.updateOne({ _id: latestSales?._id }, { $set: updatedSaleValues });
                 await this.transactionService.updateTransactionData(data.transactionHash, {is_process: true});
+               
+                get(userRef)
+                .then(async (snapshot) => {
+                  if (snapshot.exists()) {
+                    update(userRef, {
+                      lastActive: Date.now(),
+                      is_process: true,
+                    });
+                  }
+                })
               }
             }
           } else if (data.status === "paid") {
@@ -291,7 +343,6 @@ export class AppService {
               cryptoAmount = 0;
             }
           }
-          console.log("sales paid", sales) 
           const createOrder = {
             transactionHash: tx.transactionHash,
             price_amount:usdtAmount,
@@ -314,10 +365,29 @@ export class AppService {
             sale_name: sales && sales.name ? sales.name : null,
             sale_type: "outside-website"
           };
-          console.log("createOrder paid-----", createOrder);
           const transaction = await this.transactionService.createTransaction(
             createOrder
           );
+          const userRef = ref(
+            database,
+            firebaseMessages.ICO_TRANSACTIONS + "/" + tx.transactionHash
+          )
+          get(userRef)
+          .then(async (snapshot) => {
+              set(userRef, {
+                lastActive: Date.now(),
+                is_open: false,
+                is_sale: is_sale,
+                is_process: false,
+                user_wallet_address: tx.from,
+                status: "paid",
+                is_pending: true
+              });
+          })
+          .catch((error) => {
+            console.error("Error adding/updating user in Firebase:", error);
+          });
+
           if(transaction)
           {
             const existingUser = await this.userModel
@@ -343,6 +413,18 @@ export class AppService {
                   updatedSalevalues
                 );
                 await this.transactionService.updateTransactionData(tx.transactionHash, {is_process: true});
+                get(userRef)
+                .then(async (snapshot) => {
+                  if (snapshot.exists()) {
+                    update(userRef, {
+                      lastActive: Date.now(),
+                      is_process: true,
+                    });
+                  }
+                })
+                .catch((error) => {
+                  console.error("Error adding/updating user in Firebase:", error);
+                });
               }
             }
           }
@@ -594,7 +676,7 @@ export class AppService {
   private isWithinLast10Minutes(date: string): boolean {
     const currentTime = moment.utc();
     const transactionTime = moment.utc(date);
-    const twoHoursAgo = currentTime.clone().subtract(8, "days");
+    const twoHoursAgo = currentTime.clone().subtract(11, "days");
     return transactionTime.isBetween(twoHoursAgo, currentTime);
   }
 
@@ -639,7 +721,6 @@ export class AppService {
           .exec();
 
         await Promise.all(transactions.map(async transaction => {
-          
           if (transaction.transactionHash) {
             const currentSales = await this.transactionService.getAllSales();
             let userPurchaseMid = parseFloat(transaction.token_cryptoAmount.toFixed(2)) + currentSales[0].user_purchase_token;
@@ -668,8 +749,25 @@ export class AppService {
               const updatedValues = { $set: { is_sale: true , is_process: true} };
               await this.salesModel.updateOne({ _id: currentSales[0]._id }, updatedSaleValues);
               await this.transactionService.updateTransactionData(transaction.transactionHash, updatedValues);
+              const userRef = ref(
+                database,
+                firebaseMessages.ICO_TRANSACTIONS + "/" + transaction.transactionHash
+              )
+              get(userRef)
+              .then(async (snapshot) => {
+                if (snapshot.exists()) {
+                  update(userRef, {
+                    lastActive: Date.now(),
+                    is_process: true,
+                    is_pending: true,
+                    is_open: true,
+                    is_sale: true,
+                  });
+                }
+              })
             }
           }
+          
         }));
       }
 
@@ -708,6 +806,23 @@ export class AppService {
               const updatedValues = { $set: { is_sale: true , is_process: true} };
               await this.salesModel.updateOne({ _id: currentSales[1]._id }, updatedSaleValues);
               await this.transactionService.updateTransactionData(transaction.transactionHash, updatedValues)
+
+              const userRef = ref(
+                database,
+                firebaseMessages.ICO_TRANSACTIONS + "/" + transaction.transactionHash
+              )
+              get(userRef)
+              .then(async (snapshot) => {
+                if (snapshot.exists()) {
+                  update(userRef, {
+                    lastActive: Date.now(),
+                    is_process: true,
+                    is_sale: true,
+                    is_pending: true,
+                    is_open: true,
+                  });
+                }
+              })
             }
            return
           }

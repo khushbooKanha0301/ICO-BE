@@ -1,10 +1,7 @@
 import {
-  Body,
-  Controller,
-  Get,
-  HttpStatus,
-  Param,
-  Post,
+  Body, Controller,
+  Get, HttpStatus,
+  Param, Post,
   Put,
   Res,
   Req
@@ -377,28 +374,6 @@ export class TransactionsController {
   @Get("/checkCurrentSale")
   async checkCurrentSale(@Req() req: any, @Res() response) {
     const sales = await this.transactionService.getSales()
-    if (sales) { 
-      return response.status(HttpStatus.OK).json({
-        message: "Sales get successfully",
-        sales: sales
-      });
-    } else {
-      return response.status(HttpStatus.OK).json({
-        message: "Sale Not Found",
-        sales: null
-      });
-    }
-  }
-
-  /**
-   * 
-   * @param req 
-   * @param response 
-   * @returns 
-   */
-  @Get("/getAllSales")
-  async getAllSales(@Req() req: any, @Res() response) {
-    const sales = await this.transactionService.getAllSales()
     if (sales) { 
       return response.status(HttpStatus.OK).json({
         message: "Sales get successfully",

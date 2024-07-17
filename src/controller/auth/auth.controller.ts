@@ -181,6 +181,35 @@ export class AuthController {
     }
   }
 
+  
+  /**
+   * 
+   * @param req 
+   * @param response 
+   * @returns 
+   */
+  @Get("/getAllSales")
+  async getAllSales(@Req() req: any, @Res() response) {
+   try {
+    const sales = await this.transactionService.getAllSales()
+    if (sales) { 
+      return response.status(HttpStatus.OK).json({
+        message: "Sales get successfully",
+        sales: sales
+      });
+    } else {
+      return response.status(HttpStatus.OK).json({
+        message: "Sale Not Found",
+        sales: null
+      });
+    }
+   } catch (err){
+    return response.status(HttpStatus.BAD_REQUEST).json({
+      message: "Something went wrong",
+    });
+   }
+  }
+
   /**
    * Retrieves the total count of MID (Merchant ID) records.
    * @param req

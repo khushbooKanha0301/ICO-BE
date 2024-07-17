@@ -167,7 +167,7 @@ export class TransactionsService {
     if (statusFilter && statusFilter.length > 0) {
       transactionsQuery = transactionsQuery.where({
         status: { $in: statusFilter },
-      });
+      })
     }
   
     // Pagination
@@ -175,7 +175,7 @@ export class TransactionsService {
       const skipCount = (page - 1) * pageSize;
       transactionsQuery = transactionsQuery.skip(skipCount).limit(pageSize);
     }
-  
+   
     const transactions = await transactionsQuery
       .sort({ created_at: "desc" })
       .exec();
