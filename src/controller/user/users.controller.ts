@@ -1,10 +1,8 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   HttpStatus,
-  Param,
   Post,
   Put,
   Res,
@@ -17,6 +15,7 @@ import {
 import { CreateUserDto } from "src/dto/create-users.dto";
 import { UpdateUserProfileDto } from "src/dto/update-users-profile.dto";
 import { UserService } from "src/service/user/users.service";
+import { EmailService } from "src/service/email/email.service";
 import { TokenService } from "src/service/token/token.service";
 import { AnyFilesInterceptor, FileInterceptor } from "@nestjs/platform-express";
 import { Express } from "express";
@@ -24,36 +23,57 @@ import { ConfigService } from "@nestjs/config";
 import { UpdateAccountSettingsDto } from "src/dto/update-account-settings.dto";
 import { UpdateKycDataDto } from "src/dto/update-kyc.dto";
 import { SkipThrottle } from "@nestjs/throttler";
-import { TransactionsService } from "src/service/transaction/transactions.service";
-const rp = require("request-promise-native");
+import { MailerService } from "@nestjs-modules/mailer";
 import moment from "moment";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model } from "mongoose";
+import { IUser } from "src/interface/users.interface";
+const crypto = require('crypto');
+const rp = require("request-promise-native");
 const speakeasy = require("speakeasy");
+const jwt = require("jsonwebtoken");
+const Web3 = require("web3");
+const web3 = new Web3("https://cloudflare-eth.com/");
 
-var jwt = require("jsonwebtoken");
 const getSignMessage = (address, nonce) => {
   return `Please sign this message for address ${address}:\n\n${nonce}`;
 };
-const Web3 = require("web3");
 
-const web3 = new Web3("https://cloudflare-eth.com/");
+// Ensure the secret key is 32 bytes long
+const secretKey = crypto.createHash('sha256').update('your-secret-key').digest('base64').substr(0, 32);
+const iv = crypto.randomBytes(16); // Initialization vector
+
+function encryptEmail(email) {
+  try {
+    const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(secretKey), iv);
+    let encrypted = cipher.update(email, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return iv.toString('hex') + ':' + encrypted; // Combine IV with encrypted email
+  } catch (error) {
+    console.error("Encryption error:", error);
+    return null;
+  }
+}
 
 @SkipThrottle()
 @Controller("users")
 export class UsersController {
   constructor(
     private readonly userService: UserService,
+    private readonly emailService: EmailService,
     private readonly tokenService: TokenService,
     private readonly configService: ConfigService,
-    private readonly transactionService: TransactionsService
+    private readonly mailerService: MailerService,
+    @InjectModel("user") private usersModel: Model<IUser>
   ) {}
 
   /**
    * This API endpoint verifies the authenticity of a user's identity based on the provided signature.
-   * @param req 
-   * @param response 
-   * @param body 
-   * @param query 
-   * @returns 
+   * @param req
+   * @param response
+   * @param body
+   * @param query
+   * @returns
    */
   @SkipThrottle(false)
   @Post("/verify")
@@ -142,7 +162,7 @@ export class UsersController {
         userInfo.google_auth_secret = undefined;
         return response.status(HttpStatus.OK).json({
           token: token,
-          userInfo: userInfo,
+          user_id: userInfo._id,
           imageUrl: imageUrl ? imageUrl : null,
         });
       } else {
@@ -157,9 +177,9 @@ export class UsersController {
 
   /**
    * This API endpoint creates a new user based on the provided user data.
-   * @param response 
-   * @param createUserDto 
-   * @returns 
+   * @param response
+   * @param createUserDto
+   * @returns
    */
   @Post()
   async createUsers(@Res() response, @Body() createUserDto: CreateUserDto) {
@@ -180,11 +200,11 @@ export class UsersController {
 
   /**
    * This API endpoint updates user profile information including profile picture.
-   * @param req 
-   * @param response 
-   * @param updateUsersDto 
-   * @param file 
-   * @returns 
+   * @param req
+   * @param response
+   * @param updateUsersDto
+   * @param file
+   * @returns
    */
   @Put()
   @UseInterceptors(FileInterceptor("profile"))
@@ -274,13 +294,13 @@ export class UsersController {
 
   /**
    * This method handles the updating of KYC (Know Your Customer) information for a user.
-  * It receives the updated KYC data, including personal information and document uploads,
-  * validates the data, and updates the user's KYC information in the database.
-   * @param response 
-   * @param updateKycDto 
-   * @param req 
-   * @param files 
-   * @returns 
+   * It receives the updated KYC data, including personal information and document uploads,
+   * validates the data, and updates the user's KYC information in the database.
+   * @param response
+   * @param updateKycDto
+   * @param req
+   * @param files
+   * @returns
    */
   @SkipThrottle(false)
   @Put("/updateKyc")
@@ -293,7 +313,7 @@ export class UsersController {
   ) {
     try {
       let reqError = null;
-      
+
       updateKycDto.fname = updateKycDto.fname.trim();
       updateKycDto.lname = updateKycDto.lname.trim();
       updateKycDto.res_address = updateKycDto.res_address.trim();
@@ -339,8 +359,7 @@ export class UsersController {
         }
       }
       const pattern = /^[a-zA-Z0-9]*$/;
-      if(!updateKycDto.postal_code.match(pattern))
-      {
+      if (!updateKycDto.postal_code.match(pattern)) {
         reqError = "Postal code not valid";
       }
       if (reqError) {
@@ -422,27 +441,57 @@ export class UsersController {
         }
       }
 
-      const data = await this.userService.updateKyc(
+      await this.userService.updateKyc(
         UserId,
         updateKycDto,
         passport_url,
         user_photo_url
       );
-      return response.status(HttpStatus.OK).json({
-        message: "Users has been successfully updated.",
-      });
-    } catch (err) {
-      return response.status(HttpStatus.BAD_REQUEST).json(err.response);
+      const updateData = await this.userService.getUser(UserId);
+
+      if (updateData && updateData?.email && updateData?.email_verified) {
+        const globalContext = {
+          formattedDate: moment().format("dddd, MMMM D, YYYY"),
+          greeting: `Hello ${updateData?.fname
+            ? updateData?.fname + " " + updateData?.lname
+            : "John Doe"}`,
+          para1: "Thank you for submitting your verification request. We've received your submitted document and other information for identity verification.",
+          para2: "We'll review your information and if all is in order will approve your identity. If the information is incorrect or something missing, we will request this as soon as possible.",
+          title: "KYC Submitted Email"
+        };
+        const mailSubject = `[Middn.io] :: Document Submitted for Identity Verification - https://ico.middn.com/`;
+        const isVerified = await this.emailService.sendVerificationEmail(
+          updateData,
+          globalContext,
+          mailSubject
+        );
+
+        if (isVerified) {
+          return response.status(HttpStatus.OK).json({
+            message: "Users has been successfully updated.",
+          });
+        } else {
+          return response.status(HttpStatus.BAD_REQUEST).json({
+            message: "Invalid or expired verification token.",
+          });
+        }
+      } else {
+        return response.status(HttpStatus.OK).json({
+          message: "Users has been successfully updated.",
+        });
+      }
+    } catch (error) {
+      return response.status(HttpStatus.BAD_REQUEST).json(error.response);
     }
   }
 
   /**
    * This method validates the file type and size of an uploaded file.
- * It checks if the uploaded file has a valid file extension and size,
- * and returns an appropriate response message accordingly.
-   * @param response 
-   * @param file 
-   * @returns 
+   * It checks if the uploaded file has a valid file extension and size,
+   * and returns an appropriate response message accordingly.
+   * @param response
+   * @param file
+   * @returns
    */
   @Post("/validate-file-type")
   @UseInterceptors(AnyFilesInterceptor())
@@ -466,10 +515,15 @@ export class UsersController {
             .status(HttpStatus.BAD_REQUEST)
             .json({ message: "Please upload Valid Image" });
         }
-        if (file[0].size / (1024 * 1024) > allowed_file_size || file[0].size < 10240) {
+        if (
+          file[0].size / (1024 * 1024) > allowed_file_size ||
+          file[0].size < 10240
+        ) {
           return response
             .status(HttpStatus.BAD_REQUEST)
-            .json({ message: "File size should come between 10 KB to 5120 KB" });
+            .json({
+              message: "File size should come between 10 KB to 5120 KB",
+            });
         }
         return response
           .status(HttpStatus.OK)
@@ -482,10 +536,10 @@ export class UsersController {
 
   /**
    * * This method updates the account settings of a user.
-   * @param req 
-   * @param response 
-   * @param updateAccountSettingDto 
-   * @returns 
+   * @param req
+   * @param response
+   * @param updateAccountSettingDto
+   * @returns
    */
   @SkipThrottle(false)
   @Put("/updateAccountSettings")
@@ -499,49 +553,46 @@ export class UsersController {
         req.headers.authData.verifiedAddress
       );
       const UserId = userDetails._id.toString();
+     
       updateAccountSettingDto.fname = updateAccountSettingDto.fname.trim();
       updateAccountSettingDto.lname = updateAccountSettingDto.lname.trim();
       updateAccountSettingDto.email = updateAccountSettingDto.email.trim();
       updateAccountSettingDto.phone = updateAccountSettingDto.phone.trim();
       updateAccountSettingDto.city = updateAccountSettingDto.city.trim();
-      if(!updateAccountSettingDto.fname)
-      {
+      if (!updateAccountSettingDto.fname) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "First Name is missing.",
         });
       }
-      if(!updateAccountSettingDto.lname)
-      {
+     
+      if (!updateAccountSettingDto.lname) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Last Name is missing.",
         });
       }
-      if(!updateAccountSettingDto.email)
-      {
+     
+      if (!updateAccountSettingDto.email) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Email is missing.",
         });
       }
-      if(!updateAccountSettingDto.phone)
-      {
+     
+      if (!updateAccountSettingDto.phone) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Phone is missing.",
         });
       }
-      if(!updateAccountSettingDto.city)
-      {
+      if (!updateAccountSettingDto.city) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "City is missing.",
         });
       }
-      if(!updateAccountSettingDto.phoneCountry)
-      {
+      if (!updateAccountSettingDto.phoneCountry) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Phone Country is missing.",
         });
       }
-      if(!updateAccountSettingDto.dob)
-      {
+      if (!updateAccountSettingDto.dob) {
         return response.status(HttpStatus.BAD_REQUEST).json({
           message: "Date of Birth is missing.",
         });
@@ -564,14 +615,14 @@ export class UsersController {
       ) {
         delete updateAccountSettingDto.location;
       }
-      
+
       if (
         userDetails.dob &&
         (userDetails.dob != "" || userDetails.dob != null)
       ) {
         delete updateAccountSettingDto.dob;
       }
-      
+
       if (
         updateAccountSettingDto.phone &&
         !updateAccountSettingDto.phone.match("^[0-9]{5,10}$")
@@ -580,7 +631,7 @@ export class UsersController {
           message: "Invalid Phone.",
         });
       }
-
+     
       const countries = [
         "AF",
         "AL",
@@ -831,7 +882,7 @@ export class UsersController {
           message: "Invalid country name.",
         });
       }
-
+      
       let validRegex =
         /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
       if (
@@ -842,7 +893,38 @@ export class UsersController {
           message: "Invalid E-mail address.",
         });
       }
-
+      
+      if (updateAccountSettingDto.email) {
+        try {
+          // Check if the email already exists in the system
+          const userEmail = await this.userService.getFindbyEmail(updateAccountSettingDto.email);
+          
+          // Safely check if userEmail exists before accessing its properties
+          if (userEmail && userEmail._id && userEmail._id.toString() !== UserId) {
+            return response.status(HttpStatus.BAD_REQUEST).json({
+              message: "Email already exists.",
+            });
+          }
+      
+          // Check if the email is being updated and is verified
+          const userEmailCheck = await this.userService.getFindbyId(UserId);
+         
+          // If the email is verified and the user is trying to change it
+          if (userEmailCheck && userEmailCheck.email_verified && userEmailCheck.email !== updateAccountSettingDto.email) {
+            return response.status(HttpStatus.BAD_REQUEST).json({
+              message: "Your email address is already verified and cannot be changed.",
+            });
+          }
+      
+        } catch (error) {
+          console.error("Error while checking email existence: ", error);
+          return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+            message: "An error occurred while processing the request.",
+          });
+        }
+      }
+      
+     
       const countryCode = [
         "+93",
         "+355",
@@ -1103,24 +1185,52 @@ export class UsersController {
           });
         }
       }
-
       await this.userService.updateAccountSettings(
         UserId,
         updateAccountSettingDto
       );
-      return response.status(HttpStatus.OK).json({
-        message: "Users has been successfully updated.",
-      });
-    } catch (err) {
-      return response.status(HttpStatus.BAD_REQUEST).json(err.response);
+      const updateData = await this.userService.getUser(UserId);
+      if (
+        updateData && updateData?.email && (!updateData?.email_verified || updateData?.email_verified === undefined)
+      ) {
+        const mailUrl = this.configService.get("main_url");
+        const token = await this.emailService.generateEmailVerificationToken(updateData?.email, UserId);
+        const globalContext = {
+          formattedDate: moment().format('dddd, MMMM D, YYYY'),
+          id: UserId,
+          greeting: `Hello ${updateData?.fname ? updateData?.fname + ' ' + updateData?.lname : 'John Doe'}`,
+          heading: 'Welcome!',
+          confirmEmail: true,
+          para1: 'Thank you for registering on our platform. You\'re almost ready to start.',
+          para2: 'Simply click the button below to confirm your email address and activate your account.',
+          url: `${mailUrl}auth/verify-email?token=${token}`,
+          title: 'Confirm Your Email',
+        };
+        const mailSubject = '[Middn.io] Please verify your email address - https://ico.middn.com/';
+        const mailSend = await this.emailService.sendVerificationEmail(updateData, globalContext ,mailSubject)
+        if(!mailSend){
+          return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+            message: 'Failed to send verification email',
+          });
+        }
+        return response.status(HttpStatus.OK).json({
+          message: "User updated successfully. A verification email has been sent.",
+        });
+      } else {
+        return response.status(HttpStatus.OK).json({
+          message: "User has been successfully updated",
+        });
+      }
+    } catch (error) {
+      return response.status(HttpStatus.BAD_REQUEST).json(error.response);
     }
   }
 
   /**
    *  * This method retrieves user information based on the authenticated user's address.
-   * @param req 
-   * @param response 
-   * @returns 
+   * @param req
+   * @param response
+   * @returns
    */
   @Get("/getuser")
   async getUser(@Req() req: any, @Res() response) {
@@ -1149,28 +1259,40 @@ export class UsersController {
         imageUrl = "data:image/jpg;base64," + imageBuffer.toString("base64");
       }
       if (!User.fname_alias) User.fname_alias = "John";
-      if (!User.lname_alias) User.lname_alias = "Doe"; 
+      if (!User.lname_alias) User.lname_alias = "Doe";
 
       // Setting headers if properties exist
       if (User.is_2FA_login_verified !== undefined) {
-        response.setHeader('2FA', User.is_2FA_login_verified);
+        response.setHeader("2FA", User.is_2FA_login_verified);
         User.is_2FA_login_verified = undefined;
       }
 
       if (User.is_2FA_enabled !== undefined) {
-        response.setHeader('2FA_enable', User.is_2FA_enabled);
+        response.setHeader("2FA_enable", User.is_2FA_enabled);
         User.is_2FA_enabled = undefined;
       }
 
       if (User.is_verified !== undefined) {
-        response.setHeader('kyc_verify', User.is_verified);
+        response.setHeader("kyc_verify", User.is_verified);
         User.is_verified = undefined;
       }
 
       if (User.kyc_completed !== undefined) {
-        response.setHeader('kyc_status', User.kyc_completed);
-        User.kyc_completed = undefined;;
+        response.setHeader("kyc_status", User.kyc_completed);
+        User.kyc_completed = undefined;
       }
+
+      if (User.email_verified !== undefined) {
+        response.setHeader("is_email_verified", User.email_verified);
+        User.email_verified = undefined;
+      }
+
+      if (User.email) {
+        const encryptedEmail = encryptEmail(User.email);
+        response.setHeader("is_email", encryptedEmail); // Set the encrypted email in the header
+        User.email = undefined;
+      }
+
       return response.status(HttpStatus.OK).json({
         message: "User found successfully",
         User,
@@ -1181,6 +1303,12 @@ export class UsersController {
     }
   }
 
+  /**
+   *
+   * @param req
+   * @param response
+   * @returns
+   */
   @Get("/secret")
   async secret(@Req() req, @Res() response) {
     try {
@@ -1192,10 +1320,10 @@ export class UsersController {
 
   /**
    * This method handles user logout by deleting the authentication token associated with the user.
-   * @param req 
-   * @param response 
-   * @param updateUsersDto 
-   * @returns 
+   * @param req
+   * @param response
+   * @param updateUsersDto
+   * @returns
    */
   @Get("/logout")
   async logout(
@@ -1223,10 +1351,10 @@ export class UsersController {
 
   /**
    * This method generates a secret key for enabling two-factor authentication (2FA) for the user.
-   * 
-   * @param req 
-   * @param res 
-   * @returns 
+   *
+   * @param req
+   * @param res
+   * @returns
    */
   @SkipThrottle(false)
   @Get("/generate2FASecret")
@@ -1241,7 +1369,7 @@ export class UsersController {
       if (user?.is_2FA_enabled === true) {
         return res
           .status(HttpStatus.BAD_REQUEST)
-          .json({message:"Authentication already enabled"});
+          .json({ message: "Authentication already enabled" });
       }
       const secret = speakeasy.generateSecret({ length: 20 });
       user.google_auth_secret = secret.base32;
@@ -1256,9 +1384,9 @@ export class UsersController {
 
   /**
    * This method validates a Time-based One-Time Password (TOTP) token for two-factor authentication (2FA).
-   * @param req 
-   * @param res 
-   * @returns 
+   * @param req
+   * @param res
+   * @returns
    */
   @SkipThrottle(false)
   @Post("validateTOTP")
@@ -1296,12 +1424,65 @@ export class UsersController {
       return res.status(HttpStatus.BAD_REQUEST).json(err.response);
     }
   }
-  
+
+  /**
+   *
+   * @param req
+   * @param res
+   * @returns
+   */
+  @SkipThrottle(false)
+  @Post("LoginFailedEmail")
+  async LoginFailedEmail(@Req() req: any, @Res() res) {
+    try {
+      let updateData = await this.userService.getFindbyAddress(
+        req.headers.authData.verifiedAddress
+      );
+
+      if (updateData && updateData?.email && updateData?.email_verified) {
+        const globalContext = {
+          formattedDate: moment().format("dddd, MMMM D, YYYY"),
+          greeting: `Hello ${updateData?.fname
+            ? updateData?.fname + " " + updateData?.lname
+            : "John Doe"}`,
+          title: "Unusual Login Email",
+          para1: `Someone tried to log in too many times in your <a href="https://ico.middn.com/">https://ico.middn.com/</a> account.`
+        };
+        const mailSubject = `[Middn.io] :: Unusual Login Attempt on https://ico.middn.com/ !!!!`;
+        const isVerified = await this.emailService.sendVerificationEmail(
+          updateData,
+          globalContext,
+          mailSubject
+        );
+
+        if (isVerified) {
+          return res.status(HttpStatus.OK).json({
+            message: "Email successfully sent",
+          });
+        } else {
+          return res.status(HttpStatus.BAD_REQUEST).json({
+            message: "Invalid or expired verification token.",
+          });
+        }
+      }
+    } catch (error) {
+      if (error.name === "TokenExpiredError") {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          message: "Expired Verification Token.",
+        });
+      } else {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          message: "Invalid Verification Token",
+        });
+      }
+    }
+  }
+
   /**
    * This method disables two-factor authentication (2FA) for a user.
-   * @param req 
-   * @param res 
-   * @returns 
+   * @param req
+   * @param res
+   * @returns
    */
   @SkipThrottle(false)
   @Get("disable2FA")
@@ -1310,24 +1491,131 @@ export class UsersController {
       let user = await this.userService.getFindbyAddress(
         req.headers.authData.verifiedAddress
       );
-
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
       if (user?.is_2FA_enabled === false) {
         return res
           .status(HttpStatus.BAD_REQUEST)
-          .json({message:"Authentication already disabled"});
+          .json({ message: "Authentication already disabled" });
       }
       user.is_2FA_enabled = false;
       user.is_2FA_login_verified = true;
       user.google_auth_secret = "";
       await user.save();
-      return res
+      if (user && user.email && user?.email_verified) {
+        const globalContext = {
+          formattedDate: moment().format("dddd, MMMM D, YYYY"),
+          greeting: `Hello ${user?.fname
+            ? user?.fname + " " + user?.lname + ","
+            : "John Doe"}`,
+          confirmEmail: false,
+          para1: "We are reset your 2FA authentication as per your requested via support.",
+          para2: "If you really want to reset 2FA authentication security in your account, then click the button below to confirm and reset 2FA security.",
+          title: "2FA Disable Confirmation by Admin"
+        };
+
+        const mailSubject = `[Middn.io] :: Disable 2FA Authentication Request`;
+        const isVerified = await this.emailService.sendVerificationEmail(
+          user,
+          globalContext,
+          mailSubject
+        );
+
+        if (!isVerified) {
+          return res.status(HttpStatus.BAD_REQUEST).json({
+            message: "Invalid or expired verification token.",
+          });
+        } else {
+          console.log("isVerified ", isVerified);
+          return res
+          .status(HttpStatus.OK)
+          .json({ message: "2FA disabled successfully" });
+        }
+      } else {
+        return res
         .status(HttpStatus.OK)
         .json({ message: "2FA disabled successfully" });
+      }
+      
+    } catch (error) {
+      if (error.name === "TokenExpiredError") {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          message: "Expired Verification Token.",
+        });
+      } else {
+        return res.status(HttpStatus.UNAUTHORIZED).json({
+          message: "Invalid Verification Token",
+        });
+      }
+    }
+  }
+
+  /**
+   * 
+   * @param response 
+   * @param req 
+   * @returns 
+   */
+  @SkipThrottle(false)
+  @Post("/changePassword")
+  async changePassword(@Res() response, @Req() req: any) {
+    try {
+      const { oldPassword, newPassword, confirmPassword } = req.body;
+      const userAddress = req.headers.authData.verifiedAddress;
+
+      // Fetch user by address
+      const user = await this.userService.getFindbyAddress(userAddress);
+
+      // Check if user exists
+      if (!user) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          message: "User not found.",
+        });
+      }
+
+      // Validate old password
+      const isOldPasswordValid = await this.userService.comparePasswords(
+        oldPassword,
+        user.password
+      );
+      if (!isOldPasswordValid) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          message: "Old password is incorrect.",
+        });
+      }
+
+      // Check if new passwords match
+      if (newPassword !== confirmPassword) {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          message: "New password and confirm password do not match.",
+        });
+      }
+
+      // Hash the new password
+      const hashedNewPassword = await this.userService.hashPassword(
+        newPassword
+      );
+
+      // Update the password in the database
+      const changePassword = await this.usersModel
+        .updateOne({ email: user.email }, { password: hashedNewPassword })
+        .exec();
+
+      // Check if password change was successful
+      if (changePassword.modifiedCount > 0) {
+        return response.status(HttpStatus.OK).json({
+          message: "Your password has been changed successfully.",
+        });
+      } else {
+        return response.status(HttpStatus.BAD_REQUEST).json({
+          message: "Password change failed.",
+        });
+      }
     } catch (err) {
-      return res.status(HttpStatus.BAD_REQUEST).json(err.response);
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        message: err.message,
+      });
     }
   }
 }

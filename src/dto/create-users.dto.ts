@@ -50,6 +50,10 @@ export class CreateUserDto {
 
 	@IsOptional()
 	@IsString()
+	email_verified: boolean;
+
+	@IsOptional()
+	@IsString()
 	nonce: string;
 
 	@IsOptional()
@@ -82,4 +86,9 @@ export class CreateUserDto {
 	@IsOptional()
 	@IsString()
 	is_2FA_login_verified: string;
+
+	@IsOptional()
+	@IsString()
+	password: string;
+  
 }

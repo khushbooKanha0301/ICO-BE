@@ -56,6 +56,8 @@ export class User {
   is_verified: number;
   @Prop({ default: false })
   kyc_completed: boolean;
+  @Prop({ default: false })
+  email_verified: boolean;
   @Prop()
   referred_by: string;
   @Prop({ default: "Active" })
@@ -74,5 +76,7 @@ export class User {
   is_2FA_enabled: boolean;
   @Prop({ default: true })
   is_2FA_login_verified: boolean;
+  @Prop()
+	password: string;
 }
 export const UserSchema = SchemaFactory.createForClass(User);

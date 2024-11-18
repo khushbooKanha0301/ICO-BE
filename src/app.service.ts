@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model } from "mongoose";
 import { TransactionsService } from "src/service/transaction/transactions.service";
@@ -9,16 +9,18 @@ import axios from "axios";
 import { Cron } from "@nestjs/schedule";
 import { ISales } from "src/interface/sales.interface";
 import { IUser } from "src/interface/users.interface";
-
+import { ConfigService } from "@nestjs/config";
 import { database, firebaseMessages } from "./config/firebaseConfig";
-import { get, onValue, ref, set, update } from "firebase/database";
-
+import { get,  ref, set, update } from "firebase/database";
+import { MailerService } from "@nestjs-modules/mailer";
+import { EmailService } from "src/service/email/email.service";
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
 
 const ETHERSCAN_API_KEY = "7ATF9VTNMJCSVFCYYKA5HJBAFI5FEX8TCF";
 const BSCSCAN_API_KEY = "W11WIQSRZBP3CV14T5K94BD113HX1ASP77";
 const FANTOM_API_KEY = "AMEB7ZHTNCBV5WAVB9UC7WBIZV9Z9ZQSCN";
 const POLYGON_API_KEY = "11KMKMT41HFN8HXVJDWXUW2MFSJJFXY34H";
-const RECEIVER_ADDRESS = "0xf52543f63073140b3DB0393904DB07e3bb07484D";
 const ETH_CONTRACT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
 const FTM_USDT_ADDRESS = "0x049d68029688eAbF473097a2fC38ef61633A3C7A";
 const MATIC_USDT_ADDRESS = "0xc2132d05d31c914a87c6611c10748aeb04b58e8f";
@@ -34,7 +36,11 @@ export class AppService {
     @InjectModel("user") private userModel: Model<IUser>,
     @InjectModel("transaction") private transactionModel: Model<any>,
     @InjectModel("sales") private salesModel: Model<ISales>,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private readonly transactionService: TransactionsService,
+    private readonly configService: ConfigService,
+    private readonly mailerService: MailerService,
+    private readonly emailService: EmailService,
   ) {
     this.web3 = new Web3(
       new Web3.providers.HttpProvider(
@@ -42,6 +48,14 @@ export class AppService {
       )
     );
     this.scheduleRecurringCheck();
+  }
+  
+  async clearCache() {
+    await this.cacheManager.reset(); // Clears the entire cache
+  }
+
+  async clearSpecificKey(key: string) {
+    await this.cacheManager.del(key); // Clears a specific key from the cache
   }
 
   getHello(): string {
@@ -86,7 +100,7 @@ export class AppService {
         const transactions = await this.parsePendingLogs(
           responsesPending[i],
           Object.keys(networks)[i]
-        );
+        )
         allTransactionsPending = allTransactionsPending.concat(transactions);
       }
 
@@ -183,6 +197,141 @@ export class AppService {
     }
   }
 
+  private async fetchTransactionFailedData() {
+    const networks = {
+      FTM: {
+        usdtAddress: FTM_USDT_ADDRESS,
+        apiKey: FANTOM_API_KEY,
+        network: "FTM",
+      },
+      ETH: {
+        usdtAddress: ETH_CONTRACT_ADDRESS,
+        apiKey: ETHERSCAN_API_KEY,
+        network: "ETH",
+      },
+      BNB: {
+        usdtAddress: BNB_USDT_ADDRESS,
+        apiKey: BSCSCAN_API_KEY,
+        network: "BNB",
+      },
+      MATIC: {
+        usdtAddress: MATIC_USDT_ADDRESS,
+        apiKey: POLYGON_API_KEY,
+        network: "MATIC",
+      },
+    };
+
+    // Calculate block numbers for the last 2 hours
+    try {
+      const responsesPending = await Promise.all([
+        this.fetchFailedTransactionsForNetwork(networks["FTM"]),
+        this.fetchFailedTransactionsForNetwork(networks["ETH"]),
+        this.fetchFailedTransactionsForNetwork(networks["BNB"]),
+        this.fetchFailedTransactionsForNetwork(networks["MATIC"])
+      ]);
+
+      let allTransactionsFailed = [];
+      for (let i = 0; i < responsesPending.length; i++) {
+        const transactions = await this.parsePendingLogs(
+          responsesPending[i],
+          Object.keys(networks)[i]
+        );
+        allTransactionsFailed = allTransactionsFailed.concat(transactions);
+      }
+
+      const userFailedTransactions = await Promise.all(
+        allTransactionsFailed.map(async (tx) => {
+          const data = await this.transactionService.getTransactionByOredrId(
+            tx.transactionHash
+          );
+          if (!data) return tx;
+          return null;
+        })
+      );
+
+      const failtransactionsWithNoData = userFailedTransactions.filter(
+        (tx) => tx !== null
+      );
+      await Promise.all(
+        failtransactionsWithNoData.map(async (tx) => {
+          const usdtAmount = parseFloat(
+            this.web3.utils.fromWei(tx.value, "ether")
+          );
+          const formattedCurrentDate = moment(tx.createDate).format(
+            "YYYY-MM-DD[T]HH:mm:ss[Z]"
+          );
+          let sales = await this.transactionService.checkOutsideSales(
+            formattedCurrentDate
+          );
+
+          let cryptoAmount = 0;
+          let is_sale = false;
+          if (sales) {
+            cryptoAmount = usdtAmount / sales.amount;
+            is_sale = true;
+          } else {
+            sales = await this.transactionService.checkOutsideNearSales(
+              formattedCurrentDate
+            );
+            if (sales) {
+              cryptoAmount = usdtAmount / sales.amount;
+              is_sale = false;
+            } else {
+              is_sale = false;
+              cryptoAmount = 0;
+            }
+          }
+          const createOrder = {
+            transactionHash: tx.transactionHash,
+            price_amount:usdtAmount,
+            status: "failed",
+            user_wallet_address: tx.from,
+            receiver_wallet_address: tx.to,
+            blockHash: tx.blockHash,
+            effectiveGasPrice: tx.gasPrice,
+            gasUsed: tx.gasUsed,
+            price_currency: "USDT",
+            created_at: moment.utc().format(),
+            paid_at: tx.createDate,
+            blockNumber: tx.blockNumber,
+            source: "purchase",
+            network: tx.network,
+            amount: usdtAmount,
+            token_cryptoAmount: cryptoAmount.toFixed(2),
+            is_sale: is_sale,
+            is_process: false,
+            sale_name: sales.name,
+            sale_type: "outside-website"
+          };
+          await this.transactionService.createTransaction(
+            createOrder
+          )
+          const userRef = ref(
+            database,
+            firebaseMessages.ICO_TRANSACTIONS + "/" + tx.transactionHash
+          )
+          get(userRef)
+          .then(async (snapshot) => {
+            set(userRef, {
+              lastActive: Date.now(),
+              is_open: false,
+              is_sale: is_sale,
+              is_process: false,
+              user_wallet_address: tx.from,
+              status: "failed",
+              is_pending: false
+            });
+          })
+          .catch((error) => {
+            console.error("Error adding/updating user in Firebase:", error);
+          });
+        })
+      );
+    } catch (error) {
+      console.error("Error fetching transaction data:", error);
+    }
+  }
+
   private async fetchTransactionPaidData() {
     const networks = {
       FTM: {
@@ -239,6 +388,36 @@ export class AppService {
           if (data.status === "pending") {
             const updateData = { status: "paid" };
             await this.transactionService.updateTransactionData(data.transactionHash, updateData);
+           
+            const existingUser = await this.userModel
+            .findOne({wallet_address: data.user_wallet_address})
+            .select("id wallet_address fname lname email email_verified is_verified kyc_completed")
+
+            const usdtAmount = parseFloat(
+              this.web3.utils.fromWei(tx.value, "ether")
+            )
+            if(existingUser && existingUser?.email && existingUser?.email_verified){
+              const globalContext = {
+                formattedDate: moment().format('dddd, MMMM D, YYYY'),
+                heading: "Thank you for your contribution!",
+                para1: `You have requested to purchase ${tx.network} token. Your order has been received and is now being waiting for payment. You order details are show below for your reference.`,
+                para2: `Your token balance will appear in your account as soon as we have confirmed your payment from ${existingUser?.wallet_address}`,
+                para3: "Feel free to contact us if you have any questions.",
+                order_details: "Order Details:",
+                order_id: `OrderID: ${data?._id}`,
+                transactionHash: `TransactionHash: ${data?.transactionHash}`,
+                price_amount: `Amount: ${usdtAmount}`,
+                title: "Token Purchase - Order Placed by Manual payment"
+              }
+  
+              const mailSubject = `[Middn.io] Order placed for Token Purchase #${existingUser?._id}`;
+              await this.emailService.sendVerificationEmail(
+                existingUser,
+                globalContext,
+                mailSubject
+              );
+            }
+           
             const userRef = ref(
               database,
               firebaseMessages.ICO_TRANSACTIONS + "/" + data.transactionHash
@@ -257,11 +436,6 @@ export class AppService {
               console.error("Error adding/updating user in Firebase:", error);
             });
 
-
-            const existingUser = await this.userModel
-            .findOne({wallet_address: data.user_wallet_address})
-            .select("id wallet_address is_verified kyc_completed")
-            
             if (existingUser && existingUser.kyc_completed === false) {
               return null;
             }
@@ -442,6 +616,7 @@ export class AppService {
     const { usdtAddress, apiKey } = networkData;
     const baseUrl = this.getBaseUrlForNetwork(networkData);
     try {
+      const receiver_address = this.configService.get('receiver_address')
       const response = await axios.get(baseUrl, {
         params: {
           module: "logs",
@@ -451,7 +626,7 @@ export class AppService {
           toBlock: "latest",
           topic0:
             "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // Transfer event signature
-          topic2: `0x${RECEIVER_ADDRESS.slice(2)
+          topic2: `0x${receiver_address.slice(2)
             .toLowerCase()
             .padStart(64, "0")}`,
           apikey: apiKey,
@@ -467,11 +642,11 @@ export class AppService {
   private async parseLogs(logs: any[], network: string) {
     try {
       let parsedTransactions = [];
-  
+      const receiver_address = this.configService.get('receiver_address')
       for (const log of logs) {
         try {
           const to = `0x${log.topics[2].slice(26)}`;
-          if (log && to && to.toLowerCase() === RECEIVER_ADDRESS.toLowerCase()){
+          if (log && to && to.toLowerCase() === receiver_address.toLowerCase()){
           const gasPrice = log.gasPrice ? this.web3.utils.hexToNumberString(log.gasPrice) : '0';
           const gasUsed = log.gasUsed ? this.web3.utils.hexToNumberString(log.gasUsed) : '0';
           
@@ -580,6 +755,7 @@ export class AppService {
     const { usdtAddress, apiKey } = networkData;
     const baseUrl = this.getBaseUrlForNetwork(networkData);
     try {
+      const receiver_address = this.configService.get('receiver_address')
       const response = await axios.get(baseUrl, {
         params: {
           module: 'account',
@@ -587,7 +763,7 @@ export class AppService {
           contractaddress: usdtAddress,
           sort: 'pending',
           apikey: apiKey,
-          address: RECEIVER_ADDRESS,
+          address: receiver_address,
         }
       });
       return response.data.result;
@@ -597,14 +773,44 @@ export class AppService {
     }
   }
 
+  private async fetchFailedTransactionsForNetwork(networkData: any) {
+    const { usdtAddress, apiKey } = networkData;
+    const baseUrl = this.getBaseUrlForNetwork(networkData);
+    const receiver_address = this.configService.get('receiver_address')
+      
+    try {
+      // Fetch all token transactions
+      const response = await axios.get(baseUrl, {
+        params: {
+          module: 'account',
+          action: 'tokentx',
+          contractaddress: usdtAddress,
+          sort: 'desc', // Use 'desc' to get the most recent transactions first
+          apikey: apiKey,
+          address: receiver_address,
+        }
+      });
+  
+      // Filter for failed transactions
+      const allTransactions = response.data.result;
+      const failedTransactions = allTransactions.filter(tx => tx.isError === '1');
+      return failedTransactions;
+    } catch (error) {
+      console.error("Error fetching failed transactions:", error);
+      return [];
+    }
+  }
+  
   private async parsePendingLogs(logs: any[], network: string) {
     try {
       let parsedTransactions = [];
+      const receiver_address = this.configService.get('receiver_address')
+    
       for (const log of logs) {
         try {
           const formattedDate = moment.unix(log.timeStamp).utc().format();
 
-          if (log && log.to && log.to.toLowerCase() === RECEIVER_ADDRESS.toLowerCase()){
+          if (log && log.to && log.to.toLowerCase() === receiver_address.toLowerCase()){
             if (!this.isWithinLast10Minutes(formattedDate)) {
               continue;
             }    
@@ -676,7 +882,7 @@ export class AppService {
   private isWithinLast10Minutes(date: string): boolean {
     const currentTime = moment.utc();
     const transactionTime = moment.utc(date);
-    const twoHoursAgo = currentTime.clone().subtract(11, "days");
+    const twoHoursAgo = currentTime.clone().subtract(1, "days");
     return transactionTime.isBetween(twoHoursAgo, currentTime);
   }
 
@@ -687,6 +893,7 @@ export class AppService {
       const currentTime = moment.utc().format();
       console.log(`cron is running ${currentTime}`)
       await this.fetchTransactionData();
+      await this.fetchTransactionFailedData();
     } catch (error) {
       console.error(error);
     }
@@ -767,7 +974,7 @@ export class AppService {
               })
             }
           }
-          
+
         }));
       }
 

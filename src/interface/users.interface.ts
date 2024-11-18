@@ -5,6 +5,7 @@ export interface IUser extends Document {
   readonly dob: string;
   readonly fullname: string;
   readonly email: string;
+  readonly email_verified: boolean;
   readonly phone: string;
   readonly phoneCountry: string;
   readonly currentpre: string;
@@ -34,4 +35,5 @@ export interface IUser extends Document {
   readonly google_auth_secret: string;
   readonly is_2FA_enabled: boolean;
   readonly is_2FA_login_verified: boolean;
+  readonly password: string;
 }

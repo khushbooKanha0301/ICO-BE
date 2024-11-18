@@ -30,7 +30,7 @@ export class AuthenticateMiddleware implements NestMiddleware {
       );
       res.header(
         'Access-Control-Expose-Headers',
-        'Content-Length, 2FA, 2FA_enable , kyc_verify, kyc_status',
+        'Content-Length, 2FA, 2FA_enable , kyc_verify, kyc_status, is_email_verified, is_email',
       );
       // Extract the JWT token from the authorization header
       const authHeader = req.headers["authorization"];

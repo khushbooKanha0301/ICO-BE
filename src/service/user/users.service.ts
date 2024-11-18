@@ -8,6 +8,7 @@ import { ConfigService } from "@nestjs/config";
 import { UpdateAccountSettingsDto } from "src/dto/update-account-settings.dto";
 import { UpdateKycDataDto } from "src/dto/update-kyc.dto";
 import moment from "moment";
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UserService {
@@ -15,10 +16,12 @@ export class UserService {
     @InjectModel("user") private userModel: Model<IUser>,
     private configService: ConfigService
   ) {}
+
   async createUser(CreateUserDto: CreateUserDto): Promise<IUser> {
     const newUser = await new this.userModel(CreateUserDto);
     return newUser.save();
   }
+  
   async updateUser(
     userId: string,
     body: UpdateUserProfileDto,
@@ -157,6 +160,7 @@ export class UserService {
     }
     return existingUser;
   }
+
   async getFindbyAddress(address: string): Promise<any> {
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
@@ -164,6 +168,7 @@ export class UserService {
       .exec();
     return existingUser;
   }
+
   async deleteUser(userId: string): Promise<IUser> {
     const deletedUser = await this.userModel.findByIdAndDelete(userId);
     if (!deletedUser) {
@@ -171,11 +176,13 @@ export class UserService {
     }
     return deletedUser;
   }
+
   async getAllUsersExceptAuth(userId: string): Promise<any> {
     const allUsers = await this.userModel.find();
     const existingUser = allUsers.filter((user) => user.id !== userId);
     return existingUser;
   }
+
   async getUserDetailByAddress(address: string): Promise<any> {
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
@@ -186,6 +193,7 @@ export class UserService {
     }
     return existingUser;
   }
+
   async getOnlyUserBioByAddress(address: string): Promise<any> {
     const caseInsensitiveAddress = new RegExp(`^${address}$`, 'i');
     const existingUser = await this.userModel
@@ -196,5 +204,43 @@ export class UserService {
       throw new NotFoundException(`Address #${address} not found`);
     }
     return existingUser;
+  }
+
+  async hashPassword(password: string): Promise<string> {
+    const saltRounds = 10;
+    return bcrypt.hash(password, saltRounds);
+  }
+
+  async comparePasswords(
+    password: string,
+    hashedPassword: string,
+  ): Promise<boolean> {
+    return bcrypt.compare(password, hashedPassword);
+  }
+  
+  async findOneByEmail(email: string, userId: string): Promise<IUser | undefined> {
+    return this.userModel.findOne({ where: { email , _id: userId} });
+  }
+
+  async getFindbyEmail(email: string): Promise<any>{
+    const existingUser = await this.userModel
+    .findOne({ email })
+    .select("_id email email_verified")
+    .exec();
+    if(existingUser){
+      return existingUser
+    }
+    return [];
+  }
+
+  async getFindbyId(userId: string): Promise<any>{
+    const existingUser = await this.userModel
+    .findById(userId)
+    .select("_id email email_verified")
+    .exec();
+    if(existingUser){
+      return existingUser
+    }
+    return [];
   }
 }
